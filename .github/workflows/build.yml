@@ -172,8 +172,10 @@ jobs:
         id: cache-bun
         uses: actions/cache@v4
         with:
-          path: ${{ env.WORK_DIR }}/bun-build/bun
-          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
+          path: |
+            ${{ env.WORK_DIR }}/bun-build/bun
+            ${{ env.WORK_DIR }}/bun-build/bun-profile
+          key: bun-android-v2-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
 
       # =============================================
       # Clone and patch sources
@@ -231,6 +233,13 @@ jobs:
           ls -lh "$BUN_BINARY"
           file "$BUN_BINARY"
           readelf -h "$BUN_BINARY" | grep -E "Machine|Class"
+          # Check bun-profile (built alongside bun; needed for debug variant)
+          BUN_PROFILE="${WORK_DIR}/bun-build/bun-profile"
+          if [ -f "$BUN_PROFILE" ]; then
+            echo "bun-profile: $(du -h "$BUN_PROFILE" | cut -f1) — debug variant will be built"
+          else
+            echo "bun-profile: not present — debug variant will be skipped"
+          fi
 
       # =============================================
       # Build libopentui.so
@@ -314,6 +323,8 @@ jobs:
             # The zip contains wrapper + binary + libtagfix.so; unzip all into bin/:
             unzip opencode-${{ env.OPENCODE_VERSION }}-android-aarch64.zip -d $PREFIX/bin/
             chmod +x $PREFIX/bin/opencode $PREFIX/bin/opencode.bin
+            # If the zip includes a debug variant (opencode-debug / opencode-debug.bin):
+            chmod +x $PREFIX/bin/opencode-debug $PREFIX/bin/opencode-debug.bin
             ```
 
             ### Android compatibility fix
@@ -322,6 +333,10 @@ jobs:
             and any device with bionic TBI heap tagging enabled by default).
             A preloaded library disables bionic's software heap tagging before
             JavaScriptCore initialises, preventing the tag-mismatch abort on free().
+
+            If opencode still crashes with a **Zig panic** (e.g. "integer does not fit
+            in destination type"), run `opencode-debug` instead and paste the full
+            stack trace in the issue — the unstripped binary gives file:line info.
 
             ### Build info
             - Bun: v${{ env.BUN_VERSION }} (cross-compiled for Android aarch64)

@@ -111,6 +111,49 @@ if [ -n "$BACKUP_FILE" ] && [ -f "$BACKUP_FILE" ]; then
     mv "$BACKUP_FILE" "$OPENTUI_NODE_MODULE"
 fi
 
+# ============================================================
+# Optional: build opencode-debug using bun-profile (unstripped)
+# ============================================================
+# bun-profile keeps DWARF symbols so Zig's panic handler prints
+# file:line stack traces. Non-fatal: skip gracefully if absent.
+ANDROID_DEBUG_BUN="$BUN_BUILD/bun-profile"
+if [ -f "$ANDROID_DEBUG_BUN" ]; then
+    echo ""
+    echo ">>> Building OpenCode debug variant (bun-profile, unstripped)..."
+    DEBUG_OUTPUT_DIR="$DIST_DIR/.debug-tmp"
+    DEBUG_BINARY="$DIST_DIR/opencode-debug"
+
+    # Re-swap libopentui.so for the second build pass
+    DEBUG_LIBOPENTUI_BACKUP=""
+    if [ -n "${OPENTUI_NODE_MODULE:-}" ] && [ -f "$ARM64_LIBOPENTUI" ]; then
+        DEBUG_LIBOPENTUI_BACKUP="${OPENTUI_NODE_MODULE}.x64.debug-bak"
+        cp "$OPENTUI_NODE_MODULE" "$DEBUG_LIBOPENTUI_BACKUP"
+        cp "$ARM64_LIBOPENTUI" "$OPENTUI_NODE_MODULE"
+    fi
+
+    cp "$BUILD_SCRIPT" "$BUILD_SCRIPT_LOCAL"
+    cd "$OPENCODE_PKG"
+    OPENCODE_VERSION="$OPENCODE_VERSION" \
+        ANDROID_BUN="$ANDROID_DEBUG_BUN" \
+        OUTPUT_DIR="$DEBUG_OUTPUT_DIR" \
+        OPENCODE_DIR="$OPENCODE_PKG" \
+        "$HOST_BUN" run "$BUILD_SCRIPT_LOCAL" && \
+        mv "$DEBUG_OUTPUT_DIR/opencode" "$DEBUG_BINARY" && \
+        echo "    Debug binary: $DEBUG_BINARY ($(du -h "$DEBUG_BINARY" | cut -f1))" || \
+        echo "    WARNING: Debug variant build failed, skipping"
+
+    rm -f "$BUILD_SCRIPT_LOCAL"
+    rm -rf "$DEBUG_OUTPUT_DIR"
+
+    # Restore libopentui.so after debug build
+    if [ -n "$DEBUG_LIBOPENTUI_BACKUP" ] && [ -f "$DEBUG_LIBOPENTUI_BACKUP" ]; then
+        mv "$DEBUG_LIBOPENTUI_BACKUP" "$OPENTUI_NODE_MODULE"
+    fi
+else
+    echo ">>> bun-profile not found, skipping debug variant"
+    echo "    (run 'ninja bun-profile' in the bun-build dir to enable it)"
+fi
+
 # Verify output
 OPENCODE_BINARY="$DIST_DIR/opencode"
 if [ ! -f "$OPENCODE_BINARY" ]; then

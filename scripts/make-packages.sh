@@ -30,7 +30,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
 OPENCODE_BINARY="$DIST_DIR/opencode"
+OPENCODE_DEBUG_BINARY="$DIST_DIR/opencode-debug"
 WRAPPER_SCRIPT="$REPO_ROOT/bin/opencode"
+DEBUG_WRAPPER_SCRIPT="$REPO_ROOT/bin/opencode-debug"
 TAGFIX_SRC="$REPO_ROOT/src/libtagfix.c"
 PKG_DIR="$WORK_DIR/packages"
 
@@ -84,6 +86,16 @@ cp "$WRAPPER_SCRIPT"  "$PKG_DIR/opencode"
 chmod 755 "$PKG_DIR/opencode" "$PKG_DIR/opencode.bin"
 cd "$PKG_DIR"
 zip -9 "$PKG_DIR/$ZIP_NAME" opencode opencode.bin libtagfix.so
+
+# Add debug variant to the same ZIP if it was built
+if [ -f "$OPENCODE_DEBUG_BINARY" ] && [ -f "$DEBUG_WRAPPER_SCRIPT" ]; then
+    cp "$OPENCODE_DEBUG_BINARY" "$PKG_DIR/opencode-debug.bin"
+    cp "$DEBUG_WRAPPER_SCRIPT"  "$PKG_DIR/opencode-debug"
+    chmod 755 "$PKG_DIR/opencode-debug" "$PKG_DIR/opencode-debug.bin"
+    cd "$PKG_DIR"
+    zip -9 "$PKG_DIR/$ZIP_NAME" opencode-debug opencode-debug.bin
+    echo "    Added debug variant (opencode-debug / opencode-debug.bin) to $ZIP_NAME"
+fi
 echo "    Created $ZIP_NAME"
 
 # ==========================================
@@ -189,3 +201,7 @@ echo ""
 echo "  Standalone (zip) — installs wrapper + binary + libtagfix.so into bin/:"
 echo "    unzip $ZIP_NAME -d \$PREFIX/bin/"
 echo "    chmod +x \$PREFIX/bin/opencode \$PREFIX/bin/opencode.bin"
+echo ""
+echo "  Debug variant (if included in zip) — use when opencode crashes with a Zig panic:"
+echo "    chmod +x \$PREFIX/bin/opencode-debug \$PREFIX/bin/opencode-debug.bin"
+echo "    opencode-debug  # prints file:line stack trace on panic"
