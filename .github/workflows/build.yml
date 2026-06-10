@@ -309,12 +309,19 @@ jobs:
             dpkg -i opencode_${{ env.OPENCODE_VERSION }}_aarch64.deb
             ```
 
-            **Standalone binary:**
+            **Standalone binary (zip):**
             ```bash
-            # Download and extract the .zip, then:
-            chmod +x opencode
-            mv opencode $PREFIX/bin/
+            # The zip contains wrapper + binary + libtagfix.so; unzip all into bin/:
+            unzip opencode-${{ env.OPENCODE_VERSION }}-android-aarch64.zip -d $PREFIX/bin/
+            chmod +x $PREFIX/bin/opencode $PREFIX/bin/opencode.bin
             ```
+
+            ### Android compatibility fix
+            This release includes a fix for "Pointer tag ... was truncated" SIGABRT
+            on Android 11+ (Pixel 8, Galaxy S24 Ultra, Poco F7, Snapdragon 865/870,
+            and any device with bionic TBI heap tagging enabled by default).
+            A preloaded library disables bionic's software heap tagging before
+            JavaScriptCore initialises, preventing the tag-mismatch abort on free().
 
             ### Build info
             - Bun: v${{ env.BUN_VERSION }} (cross-compiled for Android aarch64)
@@ -323,7 +330,7 @@ jobs:
             - Android API level: ${{ env.ANDROID_API }}
             - NDK: r28b (${{ env.ANDROID_NDK_VERSION }})
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
       # =============================================
       # Cleanup (keep cache, remove intermediates)

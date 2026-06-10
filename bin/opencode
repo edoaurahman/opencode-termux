@@ -1,0 +1,48 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# opencode — wrapper that disables Android bionic TBI heap pointer tagging
+#
+# The real opencode binary is opencode.bin; this script LD_PRELOAD's libtagfix.so
+# (a constructor that calls mallopt to turn off heap tagging) before exec'ing it.
+# Without this, Bun/JSC's NaN-boxing clears the 0xB4 top-byte tag on heap
+# pointers, causing bionic to SIGABRT on free(): "Pointer tag ... was truncated".
+#
+# Path resolution order (supports both standalone zip and installed package):
+#   zip:      opencode, opencode.bin, libtagfix.so all live in the same dir
+#   installed: bin/opencode, libexec/opencode/opencode.bin, lib/libtagfix.so
+
+set -e
+
+dir="$(cd "$(dirname "$0")" && pwd)"
+
+# Locate libtagfix.so
+TAGFIX=""
+for candidate in \
+    "$dir/libtagfix.so" \
+    "$dir/../lib/libtagfix.so" \
+    "${PREFIX:-/data/data/com.termux/files/usr}/lib/libtagfix.so"
+do
+    if [ -f "$candidate" ]; then
+        TAGFIX="$candidate"
+        break
+    fi
+done
+
+if [ -n "$TAGFIX" ]; then
+    export LD_PRELOAD="${TAGFIX}${LD_PRELOAD:+:$LD_PRELOAD}"
+else
+    echo "opencode: warning: libtagfix.so not found, may crash on Android 11+" >&2
+fi
+
+# Locate opencode.bin
+for candidate in \
+    "$dir/opencode.bin" \
+    "$dir/../libexec/opencode/opencode.bin" \
+    "${PREFIX:-/data/data/com.termux/files/usr}/libexec/opencode/opencode.bin"
+do
+    if [ -x "$candidate" ]; then
+        exec "$candidate" "$@"
+    fi
+done
+
+echo "opencode: error: could not find opencode.bin" >&2
+exit 127
