@@ -1,8 +1,29 @@
 diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
-index 9034757..98882d2 100644
+index 9034757..1ae0f10 100644
 --- a/packages/core/src/zig/build.zig
 +++ b/packages/core/src/zig/build.zig
-@@ -162,8 +162,13 @@ fn addNativeAudioDependencies(
+@@ -125,7 +125,19 @@ fn addMiniaudioShim(
+     };
+ 
+     artifact.addIncludePath(b.path("."));
+-    artifact.linkLibC();
++    // linkLibC() fails for Android targets ("unable to provide libc for target").
++    // Add NDK sysroot include paths manually and rely on the explicit libc.so
++    // added as an object file in buildTarget.
++    const shim_abi = target.result.abi;
++    if (shim_abi == .android or shim_abi == .androideabi) {
++        if (b.graph.env_map.get("ANDROID_NDK_HOME")) |ndk_home| {
++            const sysroot = std.fmt.allocPrint(b.allocator, "{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot", .{ndk_home}) catch unreachable;
++            artifact.addSystemIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/usr/include", .{sysroot}) catch unreachable });
++            artifact.addSystemIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/usr/include/aarch64-linux-android", .{sysroot}) catch unreachable });
++        }
++    } else {
++        artifact.linkLibC();
++    }
+     artifact.addCSourceFile(.{
+         .file = b.path("miniaudio_shim.c"),
+         .flags = c_flags,
+@@ -162,8 +174,13 @@ fn addNativeAudioDependencies(
      switch (target.result.os.tag) {
          .macos => addMacOSSystemLibraries(b, artifact, macos_sdk_path.?),
          .linux => {
@@ -18,7 +39,7 @@ index 9034757..98882d2 100644
          },
          else => {},
      }
-@@ -451,6 +456,27 @@ fn buildTarget(
+@@ -451,6 +468,27 @@ fn buildTarget(
  
      addNativeAudioDependencies(b, lib, target, macos_sdk_path);
  
