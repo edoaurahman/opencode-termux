@@ -1,6 +1,8 @@
+diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
+index 0c82ba3d..90a22cc2 100644
 --- a/packages/core/src/zig/build.zig
 +++ b/packages/core/src/zig/build.zig
-@@ -153,7 +153,25 @@
+@@ -153,7 +153,25 @@ fn addMiniaudioShim(
      };
  
      artifact.addIncludePath(b.path("."));
@@ -27,7 +29,7 @@
      artifact.addCSourceFile(.{
          .file = b.path("miniaudio_shim.c"),
          .flags = c_flags,
-@@ -190,17 +208,39 @@
+@@ -190,17 +208,39 @@ fn addNativeAudioDependencies(
      switch (target.result.os.tag) {
          .macos => addMacOSSystemLibraries(b, artifact, macos_sdk_path.?),
          .linux => {
@@ -71,7 +73,7 @@
      artifact.addIncludePath(yoga_dep.path(""));
      artifact.addCSourceFiles(.{
          .root = yoga_dep.path(""),
-@@ -320,7 +360,7 @@
+@@ -320,7 +360,7 @@ pub fn build(b: *std.Build) void {
          std.process.exit(1);
      }
      addNativeAudioDependencies(b, test_artifact, native_target, macos_sdk_path);
@@ -80,7 +82,7 @@
  
      const run_test = b.addRunArtifact(test_artifact);
      test_step.dependOn(&run_test.step);
-@@ -360,7 +400,7 @@
+@@ -360,7 +400,7 @@ pub fn build(b: *std.Build) void {
          std.process.exit(1);
      }
      addNativeAudioDependencies(b, bench_ffi_lib, native_target, macos_sdk_path);
@@ -89,7 +91,7 @@
      const install_bench_ffi = b.addInstallArtifact(bench_ffi_lib, .{});
      bench_ffi_step.dependOn(&install_bench_ffi.step);
      bench_step.dependOn(bench_ffi_step);
-@@ -492,7 +532,23 @@
+@@ -492,7 +532,28 @@ fn buildTarget(
      });
  
      addNativeAudioDependencies(b, lib, target, macos_sdk_path);
@@ -109,6 +111,11 @@
 +                .{ndk_home},
 +            ) catch unreachable;
 +            lib.addObjectFile(.{ .cwd_relative = libc_path });
++            // Set link_libc=true directly (not via linkLibC()) so that Zig's
++            // compile-time checks for std.heap.c_allocator / extern "c" fns
++            // are satisfied WITHOUT triggering Zig's libc-provision logic
++            // (which fails with "unable to provide libc" for Android/Bionic).
++            lib.link_libc = true;
 +        }
 +    }
  
