@@ -1,5 +1,5 @@
 diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
-index 0c82ba3d..90a22cc2 100644
+index 0c82ba3d..f8af616d 100644
 --- a/packages/core/src/zig/build.zig
 +++ b/packages/core/src/zig/build.zig
 @@ -153,7 +153,25 @@ fn addMiniaudioShim(
@@ -111,11 +111,11 @@ index 0c82ba3d..90a22cc2 100644
 +                .{ndk_home},
 +            ) catch unreachable;
 +            lib.addObjectFile(.{ .cwd_relative = libc_path });
-+            // Set link_libc=true directly (not via linkLibC()) so that Zig's
-+            // compile-time checks for std.heap.c_allocator / extern "c" fns
-+            // are satisfied WITHOUT triggering Zig's libc-provision logic
-+            // (which fails with "unable to provide libc" for Android/Bionic).
-+            lib.link_libc = true;
++            // Set root_module.link_libc=true so Zig's compile-time checks for
++            // std.heap.c_allocator / extern "c" fns are satisfied WITHOUT calling
++            // linkLibC() (which fails with "unable to provide libc" for Android).
++            // In Zig 0.15.x, link_libc lives on root_module, not on the Compile step.
++            lib.root_module.link_libc = true;
 +        }
 +    }
  
