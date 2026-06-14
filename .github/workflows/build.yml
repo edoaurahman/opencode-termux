@@ -160,6 +160,7 @@ jobs:
         with:
           path: ${{ env.WORK_DIR }}/deps-android/prefix
           key: icu-android-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}
+          save-always: true
 
       - name: Cache WebKit build
         id: cache-webkit
@@ -167,6 +168,7 @@ jobs:
         with:
           path: ${{ env.WORK_DIR }}/webkit-android
           key: webkit-android-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}
+          save-always: true
 
       - name: Cache Bun binary
         id: cache-bun
@@ -176,6 +178,7 @@ jobs:
             ${{ env.WORK_DIR }}/bun-build/bun
             ${{ env.WORK_DIR }}/bun-build/bun-profile
           key: bun-android-v2-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
+          save-always: true
 
       # =============================================
       # Clone and patch sources
