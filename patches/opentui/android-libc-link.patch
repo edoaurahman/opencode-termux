@@ -1,5 +1,5 @@
 diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
-index 0c82ba3d..b3dfab14 100644
+index 0c82ba3d..bfb31904 100644
 --- a/packages/core/src/zig/build.zig
 +++ b/packages/core/src/zig/build.zig
 @@ -153,7 +153,19 @@ fn addMiniaudioShim(
@@ -23,7 +23,7 @@ index 0c82ba3d..b3dfab14 100644
      artifact.addCSourceFile(.{
          .file = b.path("miniaudio_shim.c"),
          .flags = c_flags,
-@@ -190,17 +202,37 @@ fn addNativeAudioDependencies(
+@@ -190,17 +202,44 @@ fn addNativeAudioDependencies(
      switch (target.result.os.tag) {
          .macos => addMacOSSystemLibraries(b, artifact, macos_sdk_path.?),
          .linux => {
@@ -58,6 +58,13 @@ index 0c82ba3d..b3dfab14 100644
 +                .{ndk_home},
 +            ) catch unreachable;
 +            artifact.addObjectFile(.{ .cwd_relative = cxx_path });
++            // addObjectFile only adds the linker input; we also need the C++ headers.
++            const cxx_include = std.fmt.allocPrint(
++                b.allocator,
++                "{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/c++/v1",
++                .{ndk_home},
++            ) catch unreachable;
++            artifact.addSystemIncludePath(.{ .cwd_relative = cxx_include });
 +        }
 +    } else {
 +        artifact.linkLibCpp();
@@ -65,7 +72,7 @@ index 0c82ba3d..b3dfab14 100644
      artifact.addIncludePath(yoga_dep.path(""));
      artifact.addCSourceFiles(.{
          .root = yoga_dep.path(""),
-@@ -320,7 +352,7 @@ pub fn build(b: *std.Build) void {
+@@ -320,7 +359,7 @@ pub fn build(b: *std.Build) void {
          std.process.exit(1);
      }
      addNativeAudioDependencies(b, test_artifact, native_target, macos_sdk_path);
@@ -74,7 +81,7 @@ index 0c82ba3d..b3dfab14 100644
  
      const run_test = b.addRunArtifact(test_artifact);
      test_step.dependOn(&run_test.step);
-@@ -360,7 +392,7 @@ pub fn build(b: *std.Build) void {
+@@ -360,7 +399,7 @@ pub fn build(b: *std.Build) void {
          std.process.exit(1);
      }
      addNativeAudioDependencies(b, bench_ffi_lib, native_target, macos_sdk_path);
@@ -83,7 +90,7 @@ index 0c82ba3d..b3dfab14 100644
      const install_bench_ffi = b.addInstallArtifact(bench_ffi_lib, .{});
      bench_ffi_step.dependOn(&install_bench_ffi.step);
      bench_step.dependOn(bench_ffi_step);
-@@ -492,7 +524,23 @@ fn buildTarget(
+@@ -492,7 +531,23 @@ fn buildTarget(
      });
  
      addNativeAudioDependencies(b, lib, target, macos_sdk_path);
