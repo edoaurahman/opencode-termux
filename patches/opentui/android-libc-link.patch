@@ -1,14 +1,15 @@
 diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
-index 0c82ba3d..177c7a48 100644
+index 0c82ba3d..b3dfab14 100644
 --- a/packages/core/src/zig/build.zig
 +++ b/packages/core/src/zig/build.zig
-@@ -153,7 +153,18 @@ fn addMiniaudioShim(
+@@ -153,7 +153,19 @@ fn addMiniaudioShim(
      };
  
      artifact.addIncludePath(b.path("."));
 -    artifact.linkLibC();
 +    // linkLibC() fails for Android targets ("unable to provide libc for target").
-+    // Add NDK sysroot include paths manually instead.
++    // Add NDK sysroot include paths manually and rely on the explicit libc.so
++    // added as an object file in buildTarget.
 +    const shim_abi = target.result.abi;
 +    if (shim_abi == .android or shim_abi == .androideabi) {
 +        if (b.graph.env_map.get("ANDROID_NDK_HOME")) |ndk_home| {
@@ -22,13 +23,14 @@ index 0c82ba3d..177c7a48 100644
      artifact.addCSourceFile(.{
          .file = b.path("miniaudio_shim.c"),
          .flags = c_flags,
-@@ -190,17 +201,29 @@ fn addNativeAudioDependencies(
+@@ -190,17 +202,37 @@ fn addNativeAudioDependencies(
      switch (target.result.os.tag) {
          .macos => addMacOSSystemLibraries(b, artifact, macos_sdk_path.?),
          .linux => {
 -            artifact.linkSystemLibrary("dl");
 -            artifact.linkSystemLibrary("pthread");
-+            // Android/Bionic folds dl and pthread into libc.so — no separate stubs in NDK.
++            // Android/Bionic folds dl and pthread into libc.so — no separate stubs in the NDK.
++            // Requesting them causes Zig to fail with "unable to find dynamic system library".
 +            const abi = target.result.abi;
 +            if (abi != .android and abi != .androideabi) {
 +                artifact.linkSystemLibrary("dl");
@@ -44,19 +46,26 @@ index 0c82ba3d..177c7a48 100644
      const yoga_dep = b.dependency("yoga", .{});
  
 -    artifact.linkLibCpp();
-+    // Android/Bionic: linkLibCpp() sets link_libc=true internally, which causes
-+    // "unable to provide libc for target" because Zig cannot bundle Bionic.
-+    // linkSystemLibrary just emits -lc++ without triggering Zig's provision logic.
 +    const abi = target.result.abi;
 +    if (abi == .android or abi == .androideabi) {
-+        artifact.linkSystemLibrary("c++");
++        // linkLibCpp() triggers link_libc=true → "unable to provide libc for Android target".
++        // Link libc++_shared.so directly from the NDK sysroot via addObjectFile instead,
++        // which bypasses Zig's libc provision logic entirely.
++        if (b.graph.env_map.get("ANDROID_NDK_HOME")) |ndk_home| {
++            const cxx_path = std.fmt.allocPrint(
++                b.allocator,
++                "{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so",
++                .{ndk_home},
++            ) catch unreachable;
++            artifact.addObjectFile(.{ .cwd_relative = cxx_path });
++        }
 +    } else {
 +        artifact.linkLibCpp();
 +    }
      artifact.addIncludePath(yoga_dep.path(""));
      artifact.addCSourceFiles(.{
          .root = yoga_dep.path(""),
-@@ -320,7 +343,7 @@ pub fn build(b: *std.Build) void {
+@@ -320,7 +352,7 @@ pub fn build(b: *std.Build) void {
          std.process.exit(1);
      }
      addNativeAudioDependencies(b, test_artifact, native_target, macos_sdk_path);
@@ -65,7 +74,7 @@ index 0c82ba3d..177c7a48 100644
  
      const run_test = b.addRunArtifact(test_artifact);
      test_step.dependOn(&run_test.step);
-@@ -360,7 +383,7 @@ pub fn build(b: *std.Build) void {
+@@ -360,7 +392,7 @@ pub fn build(b: *std.Build) void {
          std.process.exit(1);
      }
      addNativeAudioDependencies(b, bench_ffi_lib, native_target, macos_sdk_path);
@@ -74,31 +83,26 @@ index 0c82ba3d..177c7a48 100644
      const install_bench_ffi = b.addInstallArtifact(bench_ffi_lib, .{});
      bench_ffi_step.dependOn(&install_bench_ffi.step);
      bench_step.dependOn(bench_ffi_step);
-@@ -492,7 +515,28 @@ fn buildTarget(
+@@ -492,7 +524,23 @@ fn buildTarget(
      });
  
      addNativeAudioDependencies(b, lib, target, macos_sdk_path);
 -    addYogaDependencies(b, lib);
 +    addYogaDependencies(b, lib, target);
 +
-+    // On Android, add NDK library search paths and link libc/libc++ as system
-+    // libraries. Zig cannot provide Bionic, so we must point it at the NDK stubs.
++    // On Android, explicitly link the NDK libc.so stub so dlopen() can resolve
++    // symbols like getauxval. Zig's linkLibC() is skipped for Android (see
++    // addMiniaudioShim), so we need a direct NEEDED: libc.so entry.
 +    const os_tag = target.result.os.tag;
-+    const tgt_abi = target.result.abi;
-+    if (os_tag == .linux and (tgt_abi == .android or tgt_abi == .androideabi)) {
-+        const ndk_lib_dir: ?[]const u8 = blk: {
-+            if (b.graph.env_map.get("ANDROID_NDK_HOME")) |ndk_home| {
-+                break :blk std.fmt.allocPrint(
-+                    b.allocator,
-+                    "{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/24",
-+                    .{ndk_home},
-+                ) catch null;
-+            }
-+            break :blk null;
-+        };
-+        if (ndk_lib_dir) |dir| {
-+            lib.addLibraryPath(.{ .cwd_relative = dir });
-+            lib.linkSystemLibrary("c");
++    const abi = target.result.abi;
++    if (os_tag == .linux and (abi == .android or abi == .androideabi)) {
++        if (b.graph.env_map.get("ANDROID_NDK_HOME")) |ndk_home| {
++            const libc_path = std.fmt.allocPrint(
++                b.allocator,
++                "{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/24/libc.so",
++                .{ndk_home},
++            ) catch unreachable;
++            lib.addObjectFile(.{ .cwd_relative = libc_path });
 +        }
 +    }
  
