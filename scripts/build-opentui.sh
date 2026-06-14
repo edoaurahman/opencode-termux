@@ -14,28 +14,50 @@ source "$SCRIPT_DIR/env.sh"
 
 ZIG_BIN="${ZIG_BIN:-zig}"
 
+# Pin opentui to a tested commit so our Android patch always applies cleanly.
+# When upgrading, regenerate patches/opentui/android-libc-link.patch against
+# the new commit and update this SHA.
+OPENTUI_COMMIT="90db1813a67db24bafaf8b321650a5c95c70f480"
+
 echo "=== Building libopentui.so for Android aarch64 ==="
 
 # Clone opentui if needed
 if [ ! -d "$OPENTUI_SRC/.git" ]; then
-    echo ">>> Cloning opentui..."
-    git clone --depth 1 https://github.com/anomalyco/opentui.git "$OPENTUI_SRC"
+    echo ">>> Cloning opentui (commit $OPENTUI_COMMIT)..."
+    git clone https://github.com/anomalyco/opentui.git "$OPENTUI_SRC"
+    cd "$OPENTUI_SRC"
+    git checkout "$OPENTUI_COMMIT"
 else
     echo ">>> opentui source exists at $OPENTUI_SRC"
+    # Ensure we are on the pinned commit
+    cd "$OPENTUI_SRC"
+    CURRENT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+    if [ "$CURRENT" != "$OPENTUI_COMMIT" ]; then
+        echo "    Resetting to pinned commit $OPENTUI_COMMIT (was $CURRENT)..."
+        git fetch origin 2>/dev/null || true
+        git checkout "$OPENTUI_COMMIT"
+    fi
 fi
 
-# Apply Android libc linking patch
-# Without this patch, the .so won't have NEEDED: libc.so, and Android's
-# dlopen() will fail because it can't resolve symbols like getauxval.
+# Apply Android libc linking patch — FATAL if it doesn't apply cleanly.
+# Upstream build.zig changes frequently; the patch must be regenerated whenever
+# OPENTUI_COMMIT is updated.
 OPENTUI_PATCH="$REPO_ROOT/patches/opentui/android-libc-link.patch"
 if [ -f "$OPENTUI_PATCH" ]; then
     echo ">>> Applying opentui Android patch..."
     cd "$OPENTUI_SRC"
-    if ! git apply --check "$OPENTUI_PATCH" 2>/dev/null; then
-        echo "    Patch already applied or does not apply cleanly, skipping"
-    else
+    if git apply --check "$OPENTUI_PATCH" 2>/dev/null; then
         git apply "$OPENTUI_PATCH"
         echo "    Patch applied successfully"
+    else
+        # Check if it was already applied (idempotent re-run)
+        if git apply --check --reverse "$OPENTUI_PATCH" 2>/dev/null; then
+            echo "    Patch already applied, skipping"
+        else
+            echo "ERROR: opentui Android patch does not apply cleanly to commit $OPENTUI_COMMIT"
+            echo "       Regenerate patches/opentui/android-libc-link.patch against this commit."
+            exit 1
+        fi
     fi
 fi
 

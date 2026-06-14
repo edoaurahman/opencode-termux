@@ -1,8 +1,8 @@
 diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
-index 9034757..1ae0f10 100644
+index 0c82ba3d..e0fe51ff 100644
 --- a/packages/core/src/zig/build.zig
 +++ b/packages/core/src/zig/build.zig
-@@ -125,7 +125,19 @@ fn addMiniaudioShim(
+@@ -153,7 +153,19 @@ fn addMiniaudioShim(
      };
  
      artifact.addIncludePath(b.path("."));
@@ -23,7 +23,7 @@ index 9034757..1ae0f10 100644
      artifact.addCSourceFile(.{
          .file = b.path("miniaudio_shim.c"),
          .flags = c_flags,
-@@ -162,8 +174,13 @@ fn addNativeAudioDependencies(
+@@ -190,8 +202,13 @@ fn addNativeAudioDependencies(
      switch (target.result.os.tag) {
          .macos => addMacOSSystemLibraries(b, artifact, macos_sdk_path.?),
          .linux => {
@@ -39,13 +39,13 @@ index 9034757..1ae0f10 100644
          },
          else => {},
      }
-@@ -451,6 +468,27 @@ fn buildTarget(
- 
+@@ -494,6 +511,27 @@ fn buildTarget(
      addNativeAudioDependencies(b, lib, target, macos_sdk_path);
+     addYogaDependencies(b, lib);
  
 +    // On Android, explicitly link the NDK libc.so stub so dlopen() can resolve
-+    // symbols like getauxval. Zig's linkLibC() emits -lc but doesn't always
-+    // produce a NEEDED: libc.so entry in the .so without a direct path hint.
++    // symbols like getauxval. Zig's linkLibC() is skipped for Android (see
++    // addMiniaudioShim), so we need a direct NEEDED: libc.so entry.
 +    const os_tag = target.result.os.tag;
 +    const abi = target.result.abi;
 +    if (os_tag == .linux and (abi == .android or abi == .androideabi)) {
