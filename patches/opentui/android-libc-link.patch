@@ -1,8 +1,6 @@
-diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
-index 0c82ba3d..af361fea 100644
 --- a/packages/core/src/zig/build.zig
 +++ b/packages/core/src/zig/build.zig
-@@ -153,7 +153,22 @@ fn addMiniaudioShim(
+@@ -153,7 +153,25 @@
      };
  
      artifact.addIncludePath(b.path("."));
@@ -14,9 +12,12 @@ index 0c82ba3d..af361fea 100644
 +    if (shim_abi == .android or shim_abi == .androideabi) {
 +        if (b.graph.env_map.get("ANDROID_NDK_HOME")) |ndk_home| {
 +            const sysroot = std.fmt.allocPrint(b.allocator, "{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot", .{ndk_home}) catch unreachable;
-+            // libc++ headers MUST come before C headers — libc++ wraps the C headers
-+            // and requires its own versions (e.g. c++/v1/string.h) to be found first.
-+            artifact.addSystemIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/usr/include/c++/v1", .{sysroot}) catch unreachable });
++            // libc++ headers MUST come before Clang's resource-dir headers.
++            // addSystemIncludePath → -isystem (searched AFTER Clang's resource dir).
++            // addIncludePath       → -I       (searched BEFORE Clang's resource dir).
++            // Zig's bundled Clang has its own stddef.h in the resource dir that does NOT
++            // define _LIBCPP_STDDEF_H; using -I ensures NDK's c++/v1/stddef.h wins.
++            artifact.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/usr/include/c++/v1", .{sysroot}) catch unreachable });
 +            artifact.addSystemIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/usr/include", .{sysroot}) catch unreachable });
 +            artifact.addSystemIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/usr/include/aarch64-linux-android", .{sysroot}) catch unreachable });
 +        }
@@ -26,7 +27,7 @@ index 0c82ba3d..af361fea 100644
      artifact.addCSourceFile(.{
          .file = b.path("miniaudio_shim.c"),
          .flags = c_flags,
-@@ -190,17 +205,39 @@ fn addNativeAudioDependencies(
+@@ -190,17 +208,39 @@
      switch (target.result.os.tag) {
          .macos => addMacOSSystemLibraries(b, artifact, macos_sdk_path.?),
          .linux => {
@@ -70,7 +71,7 @@ index 0c82ba3d..af361fea 100644
      artifact.addIncludePath(yoga_dep.path(""));
      artifact.addCSourceFiles(.{
          .root = yoga_dep.path(""),
-@@ -320,7 +357,7 @@ pub fn build(b: *std.Build) void {
+@@ -320,7 +360,7 @@
          std.process.exit(1);
      }
      addNativeAudioDependencies(b, test_artifact, native_target, macos_sdk_path);
@@ -79,7 +80,7 @@ index 0c82ba3d..af361fea 100644
  
      const run_test = b.addRunArtifact(test_artifact);
      test_step.dependOn(&run_test.step);
-@@ -360,7 +397,7 @@ pub fn build(b: *std.Build) void {
+@@ -360,7 +400,7 @@
          std.process.exit(1);
      }
      addNativeAudioDependencies(b, bench_ffi_lib, native_target, macos_sdk_path);
@@ -88,7 +89,7 @@ index 0c82ba3d..af361fea 100644
      const install_bench_ffi = b.addInstallArtifact(bench_ffi_lib, .{});
      bench_ffi_step.dependOn(&install_bench_ffi.step);
      bench_step.dependOn(bench_ffi_step);
-@@ -492,7 +529,23 @@ fn buildTarget(
+@@ -492,7 +532,23 @@
      });
  
      addNativeAudioDependencies(b, lib, target, macos_sdk_path);
