@@ -125,7 +125,7 @@ index 3f8b4b5c..15c48804 100644
  const JsMeasureCallback = *const fn (?*anyopaque, f32, u32, f32, u32) callconv(.c) void;
  const JsDirtiedCallback = *const fn () callconv(.c) void;
 -const callback_allocator = std.heap.c_allocator;
-+const callback_allocator = if (@import("builtin").target.isAndroid()) std.heap.page_allocator else std.heap.c_allocator;
++const callback_allocator = if (@import("builtin").target.abi == .android or @import("builtin").target.abi == .androideabi) std.heap.page_allocator else std.heap.c_allocator;
  var opentui_config: YGConfigRef = null;
  var opentui_config_mutex: std.Thread.Mutex = .{};
  
