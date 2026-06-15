@@ -9,9 +9,10 @@
 # 3. Deb: opencode_${VERSION}_aarch64.deb (old Termux deb format)
 #
 # Package layout (all formats):
-#   bin/opencode                  — wrapper script: sets LD_PRELOAD then execs real binary
+#   bin/opencode                  — wrapper script: sets LD_PRELOAD + LD_LIBRARY_PATH then execs real binary
 #   libexec/opencode/opencode.bin — real opencode ELF binary
 #   lib/libtagfix.so              — disables Android bionic TBI heap tagging at process start
+#   lib/libc++_shared.so          — NDK C++ runtime needed by Bun's JIT-compiled modules
 #
 # The wrapper + libtagfix.so fix "Pointer tag ... was truncated" SIGABRT on Android 11+.
 # Root cause: Bun/JSC NaN-boxing clears the top byte of heap pointers; bionic's default
@@ -23,6 +24,7 @@
 # ZIP install (flat layout — wrapper resolves siblings via $dir):
 #   unzip opencode-...-android-aarch64.zip -d $PREFIX/bin/
 #   chmod +x $PREFIX/bin/opencode $PREFIX/bin/opencode.bin
+#   (libc++_shared.so + libtagfix.so are picked up from $PREFIX/bin automatically)
 
 set -euo pipefail
 
@@ -70,7 +72,20 @@ TAGFIX_SO="$PKG_DIR/libtagfix.so"
 echo "    Compiled $(stat -c%s "$TAGFIX_SO") bytes"
 
 TAGFIX_SIZE=$(stat -c%s "$TAGFIX_SO")
-INSTALLED_SIZE=$(( (BINARY_SIZE + TAGFIX_SIZE + 8192) / 1024 ))  # rough kB estimate
+
+# libc++_shared.so is required at runtime by Bun's JIT-compiled modules.
+# Android's /system/lib64/ only ships libc++.so, not libc++_shared.so.
+echo ">>> Copying libc++_shared.so..."
+LIBCPP_SHARED_SRC="$NDK_SYSROOT/usr/lib/$ANDROID_TRIPLE/libc++_shared.so"
+if [ ! -f "$LIBCPP_SHARED_SRC" ]; then
+    echo "ERROR: libc++_shared.so not found at $LIBCPP_SHARED_SRC"
+    exit 1
+fi
+cp "$LIBCPP_SHARED_SRC" "$PKG_DIR/libc++_shared.so"
+LIBCPP_SIZE=$(stat -c%s "$PKG_DIR/libc++_shared.so")
+echo "    Copied $(stat -c%s "$PKG_DIR/libc++_shared.so") bytes"
+
+INSTALLED_SIZE=$(( (BINARY_SIZE + TAGFIX_SIZE + LIBCPP_SIZE + 8192) / 1024 ))  # rough kB estimate
 
 # ==========================================
 # 1. ZIP package (flat layout)
@@ -85,7 +100,7 @@ cp "$OPENCODE_BINARY" "$PKG_DIR/opencode.bin"
 cp "$WRAPPER_SCRIPT"  "$PKG_DIR/opencode"
 chmod 755 "$PKG_DIR/opencode" "$PKG_DIR/opencode.bin"
 cd "$PKG_DIR"
-zip -9 "$PKG_DIR/$ZIP_NAME" opencode opencode.bin libtagfix.so
+zip -9 "$PKG_DIR/$ZIP_NAME" opencode opencode.bin libtagfix.so libc++_shared.so
 
 # Add debug variant to the same ZIP if it was built
 if [ -f "$OPENCODE_DEBUG_BINARY" ] && [ -f "$DEBUG_WRAPPER_SCRIPT" ]; then
@@ -114,6 +129,9 @@ chmod 755 "$PACMAN_USR/libexec/opencode/opencode.bin"
 
 cp "$TAGFIX_SO" "$PACMAN_USR/lib/libtagfix.so"
 chmod 644 "$PACMAN_USR/lib/libtagfix.so"
+
+cp "$PKG_DIR/libc++_shared.so" "$PACMAN_USR/lib/libc++_shared.so"
+chmod 644 "$PACMAN_USR/lib/libc++_shared.so"
 
 # Create .PKGINFO
 cat > "$PACMAN_STAGING/.PKGINFO" << EOF
@@ -155,6 +173,9 @@ chmod 755 "$DEB_USR/libexec/opencode/opencode.bin"
 
 cp "$TAGFIX_SO" "$DEB_USR/lib/libtagfix.so"
 chmod 644 "$DEB_USR/lib/libtagfix.so"
+
+cp "$PKG_DIR/libc++_shared.so" "$DEB_USR/lib/libc++_shared.so"
+chmod 644 "$DEB_USR/lib/libc++_shared.so"
 
 # Create control file
 cat > "$DEB_STAGING/DEBIAN/control" << EOF
@@ -198,7 +219,7 @@ echo "Install on Termux:"
 echo "  Pacman: pacman -U $PACMAN_NAME"
 echo "  Deb:    dpkg -i $DEB_NAME"
 echo ""
-echo "  Standalone (zip) — installs wrapper + binary + libtagfix.so into bin/:"
+echo "  Standalone (zip) — installs wrapper + binary + libs into bin/:"
 echo "    unzip $ZIP_NAME -d \$PREFIX/bin/"
 echo "    chmod +x \$PREFIX/bin/opencode \$PREFIX/bin/opencode.bin"
 echo ""

@@ -326,7 +326,7 @@ jobs:
 
             **Standalone binary (zip):**
             ```bash
-            # The zip contains wrapper + binary + libtagfix.so; unzip all into bin/:
+            # The zip contains wrapper + binary + libtagfix.so + libc++_shared.so; unzip all into bin/:
             unzip opencode-${{ env.OPENCODE_VERSION }}-android-aarch64.zip -d $PREFIX/bin/
             chmod +x $PREFIX/bin/opencode $PREFIX/bin/opencode.bin
             # If the zip includes a debug variant (opencode-debug / opencode-debug.bin):
@@ -334,11 +334,14 @@ jobs:
             ```
 
             ### Android compatibility fix
-            This release includes a fix for "Pointer tag ... was truncated" SIGABRT
-            on Android 11+ (Pixel 8, Galaxy S24 Ultra, Poco F7, Snapdragon 865/870,
-            and any device with bionic TBI heap tagging enabled by default).
-            A preloaded library disables bionic's software heap tagging before
-            JavaScriptCore initialises, preventing the tag-mismatch abort on free().
+            This release includes fixes for two Android 11+ issues:
+            1. "Pointer tag ... was truncated" SIGABRT — a preloaded library disables
+               bionic's software heap tagging before JavaScriptCore initialises,
+               preventing the tag-mismatch abort on free().
+            2. Hang with no TUI output — Bun's JIT-compiled modules need
+               libc++_shared.so, which Android's /system/lib64/ does not provide.
+               The package now ships libc++_shared.so and the wrapper sets
+               LD_LIBRARY_PATH so the linker can find it.
 
             If opencode still crashes with a **Zig panic** (e.g. "integer does not fit
             in destination type"), run `opencode-debug` instead and paste the full

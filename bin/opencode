@@ -29,6 +29,11 @@ done
 
 if [ -n "$TAGFIX" ]; then
     export LD_PRELOAD="${TAGFIX}${LD_PRELOAD:+:$LD_PRELOAD}"
+    # Bun's JIT-compiled modules need libc++_shared.so. Android's /system/lib64/
+    # does not contain it, so point the linker at the directory where we ship it
+    # (co-located with libtagfix.so in both flat zip and installed layouts).
+    TAGFIX_DIR="$(dirname "$TAGFIX")"
+    export LD_LIBRARY_PATH="${TAGFIX_DIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 else
     echo "opencode: warning: libtagfix.so not found, may crash on Android 11+" >&2
 fi
