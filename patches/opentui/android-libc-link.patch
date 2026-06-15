@@ -1,5 +1,5 @@
 diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
-index 0c82ba3d..f8af616d 100644
+index 0c82ba3d..6feb5fac 100644
 --- a/packages/core/src/zig/build.zig
 +++ b/packages/core/src/zig/build.zig
 @@ -153,7 +153,25 @@ fn addMiniaudioShim(
@@ -15,8 +15,8 @@ index 0c82ba3d..f8af616d 100644
 +        if (b.graph.env_map.get("ANDROID_NDK_HOME")) |ndk_home| {
 +            const sysroot = std.fmt.allocPrint(b.allocator, "{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot", .{ndk_home}) catch unreachable;
 +            // libc++ headers MUST come before Clang's resource-dir headers.
-+            // addSystemIncludePath → -isystem (searched AFTER Clang's resource dir).
-+            // addIncludePath       → -I       (searched BEFORE Clang's resource dir).
++            // addSystemIncludePath -> -isystem (searched AFTER Clang's resource dir).
++            // addIncludePath       -> -I       (searched BEFORE Clang's resource dir).
 +            // Zig's bundled Clang has its own stddef.h in the resource dir that does NOT
 +            // define _LIBCPP_STDDEF_H; using -I ensures NDK's c++/v1/stddef.h wins.
 +            artifact.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/usr/include/c++/v1", .{sysroot}) catch unreachable });
@@ -35,7 +35,7 @@ index 0c82ba3d..f8af616d 100644
          .linux => {
 -            artifact.linkSystemLibrary("dl");
 -            artifact.linkSystemLibrary("pthread");
-+            // Android/Bionic folds dl and pthread into libc.so — no separate stubs in the NDK.
++            // Android/Bionic folds dl and pthread into libc.so -- no separate stubs in the NDK.
 +            // Requesting them causes Zig to fail with "unable to find dynamic system library".
 +            const abi = target.result.abi;
 +            if (abi != .android and abi != .androideabi) {
@@ -54,7 +54,7 @@ index 0c82ba3d..f8af616d 100644
 -    artifact.linkLibCpp();
 +    const abi = target.result.abi;
 +    if (abi == .android or abi == .androideabi) {
-+        // linkLibCpp() triggers link_libc=true → "unable to provide libc for Android target".
++        // linkLibCpp() triggers link_libc=true -> "unable to provide libc for Android target".
 +        // Link libc++_shared.so directly from the NDK sysroot via addObjectFile instead,
 +        // which bypasses Zig's libc provision logic entirely.
 +        if (b.graph.env_map.get("ANDROID_NDK_HOME")) |ndk_home| {
@@ -91,7 +91,7 @@ index 0c82ba3d..f8af616d 100644
      const install_bench_ffi = b.addInstallArtifact(bench_ffi_lib, .{});
      bench_ffi_step.dependOn(&install_bench_ffi.step);
      bench_step.dependOn(bench_ffi_step);
-@@ -492,7 +532,28 @@ fn buildTarget(
+@@ -492,7 +532,23 @@ fn buildTarget(
      });
  
      addNativeAudioDependencies(b, lib, target, macos_sdk_path);
@@ -111,13 +111,21 @@ index 0c82ba3d..f8af616d 100644
 +                .{ndk_home},
 +            ) catch unreachable;
 +            lib.addObjectFile(.{ .cwd_relative = libc_path });
-+            // Set root_module.link_libc=true so Zig's compile-time checks for
-+            // std.heap.c_allocator / extern "c" fns are satisfied WITHOUT calling
-+            // linkLibC() (which fails with "unable to provide libc" for Android).
-+            // In Zig 0.15.x, link_libc lives on root_module, not on the Compile step.
-+            lib.root_module.link_libc = true;
 +        }
 +    }
  
      const install_dir = b.addInstallArtifact(lib, .{
          .dest_dir = .{
+diff --git a/packages/core/src/zig/yoga.zig b/packages/core/src/zig/yoga.zig
+index 3f8b4b5c..15c48804 100644
+--- a/packages/core/src/zig/yoga.zig
++++ b/packages/core/src/zig/yoga.zig
+@@ -86,7 +86,7 @@ const CallbackContext = struct {
+ 
+ const JsMeasureCallback = *const fn (?*anyopaque, f32, u32, f32, u32) callconv(.c) void;
+ const JsDirtiedCallback = *const fn () callconv(.c) void;
+-const callback_allocator = std.heap.c_allocator;
++const callback_allocator = if (@import("builtin").target.isAndroid()) std.heap.page_allocator else std.heap.c_allocator;
+ var opentui_config: YGConfigRef = null;
+ var opentui_config_mutex: std.Thread.Mutex = .{};
+ 
