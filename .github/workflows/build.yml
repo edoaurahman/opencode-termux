@@ -30,6 +30,9 @@ jobs:
     name: Build Android aarch64
     runs-on: self-hosted
     timeout-minutes: 360  # 6 hours for full build
+    permissions:
+      contents: write   # required to create GitHub Releases
+      actions: write    # required for actions/cache save/restore and upload-artifact
 
     steps:
       - name: Checkout repository
