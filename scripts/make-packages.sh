@@ -100,6 +100,8 @@ do
     fi
 done
 
+OPENCODE_PKG="$OPENCODE_SRC/packages/opencode"
+
 if [ -z "$RUST_PTY_ARM64" ]; then
     echo "WARNING: librust_pty_arm64.so not found; PTY features may not work"
 else
