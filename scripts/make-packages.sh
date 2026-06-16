@@ -67,6 +67,26 @@ if [ ! -f "$ARM64_LIBOPENTUI" ]; then
     exit 1
 fi
 
+# Verify the shipped native libraries are actually AArch64.
+# e_machine for AArch64 is 0xb7 (little-endian at ELF offset 18).
+check_elf_aarch64() {
+    local file="$1"
+    local name="$2"
+    if [ ! -f "$file" ]; then
+        echo "ERROR: $name not found at $file"
+        exit 1
+    fi
+    local machine
+    machine=$(od -An -t x1 -j 18 -N 2 "$file" | tr -d ' ')
+    if [ "$machine" != "b700" ]; then
+        echo "ERROR: $name is not AArch64 (e_machine=$machine)"
+        exit 1
+    fi
+    echo "    Verified $name is AArch64"
+}
+
+check_elf_aarch64 "$ARM64_LIBOPENTUI" "libopentui.so"
+
 # Locate bun-pty's ARM64 PTY library (shipped with the npm package)
 RUST_PTY_ARM64=""
 for candidate in \
@@ -82,6 +102,8 @@ done
 
 if [ -z "$RUST_PTY_ARM64" ]; then
     echo "WARNING: librust_pty_arm64.so not found; PTY features may not work"
+else
+    check_elf_aarch64 "$RUST_PTY_ARM64" "librust_pty_arm64.so"
 fi
 
 echo "=== Creating packages for OpenCode v${OPENCODE_VERSION} ==="
@@ -100,6 +122,7 @@ echo ">>> Compiling libtagfix.so..."
 TAGFIX_SO="$PKG_DIR/libtagfix.so"
 "$ANDROID_CC" -shared -fPIC -O2 -o "$TAGFIX_SO" "$TAGFIX_SRC"
 echo "    Compiled $(stat -c%s "$TAGFIX_SO") bytes"
+check_elf_aarch64 "$TAGFIX_SO" "libtagfix.so"
 
 TAGFIX_SIZE=$(stat -c%s "$TAGFIX_SO")
 
@@ -114,6 +137,7 @@ fi
 cp "$LIBCPP_SHARED_SRC" "$PKG_DIR/libc++_shared.so"
 LIBCPP_SIZE=$(stat -c%s "$PKG_DIR/libc++_shared.so")
 echo "    Copied $(stat -c%s "$PKG_DIR/libc++_shared.so") bytes"
+check_elf_aarch64 "$PKG_DIR/libc++_shared.so" "libc++_shared.so"
 
 # libopentui.so must be shipped as a real file because Bun's /$bunfs/root/
 # virtual paths are not intercepted on Android.
