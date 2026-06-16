@@ -357,5 +357,55 @@ console.log(`Verification: total_byte_count=${verifyTotal}, file_size=${verifyBy
 const elfMagic = String.fromCharCode(verifyBytes[0], verifyBytes[1], verifyBytes[2], verifyBytes[3])
 console.log(`ELF magic: ${elfMagic === "\x7fELF" ? "OK" : "INVALID"}`)
 
+// Step 7: Verify no x86_64 ELF files were embedded in the final binary.
+// On Android, embedded x86_64 .so files (e.g. from bun-pty on a host build)
+// will fail to dlopen at runtime.
+console.log("\n=== Step 7: Verifying embedded ELF architectures ===")
+const ELF_MAGIC = [0x7f, 0x45, 0x4c, 0x46] // "\x7fELF"
+const EM_AARCH64 = 0xb7
+const EM_X86_64 = 0x3e
+const EM_X86 = 0x03
+
+let foundElfCount = 0
+let foundX64 = false
+let foundX86 = false
+
+for (let i = 0; i < verifyBytes.length - 20; i++) {
+  if (
+    verifyBytes[i] === ELF_MAGIC[0] &&
+    verifyBytes[i + 1] === ELF_MAGIC[1] &&
+    verifyBytes[i + 2] === ELF_MAGIC[2] &&
+    verifyBytes[i + 3] === ELF_MAGIC[3]
+  ) {
+    foundElfCount++
+    const ei_class = verifyBytes[i + 4]
+    const e_machine_lo = verifyBytes[i + 18]
+    const e_machine_hi = verifyBytes[i + 19]
+    const machine = e_machine_lo | (e_machine_hi << 8)
+    const archName =
+      machine === EM_AARCH64
+        ? "aarch64"
+        : machine === EM_X86_64
+        ? "x86_64"
+        : machine === EM_X86
+        ? "x86"
+        : `machine=0x${machine.toString(16)}`
+    console.log(`  ELF at offset ${i}: ${archName} (${ei_class === 1 ? "32" : "64"}-bit)`)
+    if (machine === EM_X86_64) foundX64 = true
+    if (machine === EM_X86) foundX86 = true
+  }
+}
+
+console.log(`  Found ${foundElfCount} embedded ELF image(s)`)
+
+if (foundX64 || foundX86) {
+  console.error("ERROR: Embedded x86/x86_64 ELF files detected in the Android binary!")
+  console.error("       This usually means a native dependency was resolved from the host platform.")
+  console.error("       The binary will fail at runtime on Android.")
+  process.exit(1)
+}
+
+console.log("  All embedded ELF files are AArch64: OK")
+
 console.log("\n=== Build complete! ===")
 console.log(`Output: ${androidOutputPath}`)

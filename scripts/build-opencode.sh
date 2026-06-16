@@ -55,37 +55,66 @@ if [ ! -f "$ARM64_LIBOPENTUI" ]; then
     exit 1
 fi
 
-# Find x86_64 libopentui.so in node_modules and swap it
-# OpenCode uses @opentui/core-linux-x64 which has the x86_64 version
-OPENTUI_NODE_MODULE=""
-for candidate in \
-    "$OPENCODE_SRC/node_modules/@opentui/core-linux-x64/libopentui.so" \
-    "$OPENCODE_PKG/node_modules/@opentui/core-linux-x64/libopentui.so" \
-    "$OPENCODE_SRC/node_modules/.bun/@opentui+core-linux-x64@*/node_modules/@opentui/core-linux-x64/libopentui.so"
-do
-    # Handle glob
-    for f in $candidate; do
-        if [ -f "$f" ]; then
-            OPENTUI_NODE_MODULE="$f"
-            break 2
-        fi
-    done
-done
+# Find all @opentui/core-linux-x64 package directories under node_modules.
+# We must patch every occurrence because Bun's module resolver can pick up
+# the package from multiple hoisted locations, and the .so inside each one
+# must be ARM64 and must load from a real filesystem path on Android
+# (Bun's /$bunfs/root/ virtual paths are not reliably intercepted on Android).
+OPENTUI_PACKAGES=()
+while IFS= read -r -d '' pkg_dir; do
+    OPENTUI_PACKAGES+=("$pkg_dir")
+done < <(find "$OPENCODE_SRC" -path '*/node_modules/@opentui/core-linux-x64' -type d -print0 2>/dev/null || true)
 
-BACKUP_FILE=""
-if [ -n "$OPENTUI_NODE_MODULE" ]; then
-    echo ">>> Swapping x86_64 libopentui.so with ARM64 version..."
-    BACKUP_FILE="${OPENTUI_NODE_MODULE}.x64.bak"
-    cp "$OPENTUI_NODE_MODULE" "$BACKUP_FILE"
-    cp "$ARM64_LIBOPENTUI" "$OPENTUI_NODE_MODULE"
-    echo "    Backed up to $BACKUP_FILE"
-else
-    echo "WARNING: Could not find x86_64 libopentui.so in node_modules"
-    echo "         The build may embed the wrong architecture"
+if [ ${#OPENTUI_PACKAGES[@]} -eq 0 ]; then
+    echo "ERROR: Could not find @opentui/core-linux-x64 in node_modules"
+    echo "       The build will embed the wrong architecture"
+    exit 1
 fi
 
-# Create dist directory
+# Backup list: "so_path:backup_path index_path:backup_path ..."
+OPENTUI_BACKUPS=()
+
+echo ">>> Patching @opentui/core-linux-x64 packages for Android aarch64..."
+for pkg_dir in "${OPENTUI_PACKAGES[@]}"; do
+    so_file="$pkg_dir/libopentui.so"
+    idx_file=""
+    if [ -f "$pkg_dir/index.js" ]; then
+        idx_file="$pkg_dir/index.js"
+    elif [ -f "$pkg_dir/index.ts" ]; then
+        idx_file="$pkg_dir/index.ts"
+    fi
+
+    if [ ! -f "$so_file" ]; then
+        echo "WARNING: $so_file not found, skipping $pkg_dir"
+        continue
+    fi
+
+    # Backup and swap the .so
+    so_backup="${so_file}.x64.bak"
+    cp "$so_file" "$so_backup"
+    cp "$ARM64_LIBOPENTUI" "$so_file"
+    OPENTUI_BACKUPS+=("$so_file:$so_backup")
+    echo "    Swapped $so_file"
+
+    # Patch the index file to load from filesystem on Android.
+    # Bun's /$bunfs/root/ virtual path works on desktop Linux but is not
+    # intercepted by the Android runtime, so the dlopen/openat fails with ENOENT.
+    # We fall back to a real Termux filesystem path via OPENTUI_LIB_PATH.
+    if [ -n "$idx_file" ]; then
+        idx_backup="${idx_file}.bak"
+        cp "$idx_file" "$idx_backup"
+        cat > "$idx_file" <<'IDXEOF'
+module.exports = process.env.OPENTUI_LIB_PATH || "/data/data/com.termux/files/usr/lib/libopentui.so";
+IDXEOF
+        OPENTUI_BACKUPS+=("$idx_file:$idx_backup")
+        echo "    Patched $idx_file"
+    fi
+done
+
+# Also stage libopentui.so into dist so make-packages.sh can ship it
 mkdir -p "$DIST_DIR"
+cp "$ARM64_LIBOPENTUI" "$DIST_DIR/libopentui.so"
+echo ">>> Staged ARM64 libopentui.so for packaging"
 
 # Run the TypeScript build script
 # Copy it into the OpenCode tree so Bun can resolve @opentui/solid/bun-plugin
@@ -105,10 +134,16 @@ OPENCODE_VERSION="$OPENCODE_VERSION" \
 # Clean up copied script
 rm -f "$BUILD_SCRIPT_LOCAL"
 
-# Restore original libopentui.so
-if [ -n "$BACKUP_FILE" ] && [ -f "$BACKUP_FILE" ]; then
-    echo ">>> Restoring original x86_64 libopentui.so..."
-    mv "$BACKUP_FILE" "$OPENTUI_NODE_MODULE"
+# Restore original @opentui/core-linux-x64 files
+if [ ${#OPENTUI_BACKUPS[@]} -gt 0 ]; then
+    echo ">>> Restoring original @opentui/core-linux-x64 files..."
+    for backup_spec in "${OPENTUI_BACKUPS[@]}"; do
+        orig="${backup_spec%%:*}"
+        backup="${backup_spec##*:}"
+        if [ -f "$backup" ]; then
+            mv "$backup" "$orig"
+        fi
+    done
 fi
 
 # ============================================================
@@ -123,13 +158,31 @@ if [ -f "$ANDROID_DEBUG_BUN" ]; then
     DEBUG_OUTPUT_DIR="$DIST_DIR/.debug-tmp"
     DEBUG_BINARY="$DIST_DIR/opencode-debug"
 
-    # Re-swap libopentui.so for the second build pass
-    DEBUG_LIBOPENTUI_BACKUP=""
-    if [ -n "${OPENTUI_NODE_MODULE:-}" ] && [ -f "$ARM64_LIBOPENTUI" ]; then
-        DEBUG_LIBOPENTUI_BACKUP="${OPENTUI_NODE_MODULE}.x64.debug-bak"
-        cp "$OPENTUI_NODE_MODULE" "$DEBUG_LIBOPENTUI_BACKUP"
-        cp "$ARM64_LIBOPENTUI" "$OPENTUI_NODE_MODULE"
-    fi
+    # Re-patch @opentui/core-linux-x64 for the second build pass
+    DEBUG_OPENTUI_BACKUPS=()
+    for pkg_dir in "${OPENTUI_PACKAGES[@]}"; do
+        so_file="$pkg_dir/libopentui.so"
+        idx_file=""
+        if [ -f "$pkg_dir/index.js" ]; then
+            idx_file="$pkg_dir/index.js"
+        elif [ -f "$pkg_dir/index.ts" ]; then
+            idx_file="$pkg_dir/index.ts"
+        fi
+        if [ -f "$so_file" ]; then
+            debug_backup="${so_file}.x64.debug-bak"
+            cp "$so_file" "$debug_backup"
+            cp "$ARM64_LIBOPENTUI" "$so_file"
+            DEBUG_OPENTUI_BACKUPS+=("$so_file:$debug_backup")
+        fi
+        if [ -n "$idx_file" ] && [ -f "$idx_file" ]; then
+            debug_idx_backup="${idx_file}.debug-bak"
+            cp "$idx_file" "$debug_idx_backup"
+            cat > "$idx_file" <<'IDXEOF'
+module.exports = process.env.OPENTUI_LIB_PATH || "/data/data/com.termux/files/usr/lib/libopentui.so";
+IDXEOF
+            DEBUG_OPENTUI_BACKUPS+=("$idx_file:$debug_idx_backup")
+        fi
+    done
 
     cp "$BUILD_SCRIPT" "$BUILD_SCRIPT_LOCAL"
     cd "$OPENCODE_PKG"
@@ -145,9 +198,16 @@ if [ -f "$ANDROID_DEBUG_BUN" ]; then
     rm -f "$BUILD_SCRIPT_LOCAL"
     rm -rf "$DEBUG_OUTPUT_DIR"
 
-    # Restore libopentui.so after debug build
-    if [ -n "$DEBUG_LIBOPENTUI_BACKUP" ] && [ -f "$DEBUG_LIBOPENTUI_BACKUP" ]; then
-        mv "$DEBUG_LIBOPENTUI_BACKUP" "$OPENTUI_NODE_MODULE"
+    # Restore @opentui/core-linux-x64 files after debug build
+    if [ ${#DEBUG_OPENTUI_BACKUPS[@]} -gt 0 ]; then
+        echo ">>> Restoring @opentui/core-linux-x64 files after debug build..."
+        for backup_spec in "${DEBUG_OPENTUI_BACKUPS[@]}"; do
+            orig="${backup_spec%%:*}"
+            backup="${backup_spec##*:}"
+            if [ -f "$backup" ]; then
+                mv "$backup" "$orig"
+            fi
+        done
     fi
 else
     echo ">>> bun-profile not found, skipping debug variant"

@@ -326,7 +326,8 @@ jobs:
 
             **Standalone binary (zip):**
             ```bash
-            # The zip contains wrapper + binary + libtagfix.so + libc++_shared.so; unzip all into bin/:
+            # The zip contains wrapper + binary + libtagfix.so + libc++_shared.so +
+            # libopentui.so + librust_pty_arm64.so; unzip all into bin/:
             unzip opencode-${{ env.OPENCODE_VERSION }}-android-aarch64.zip -d $PREFIX/bin/
             chmod +x $PREFIX/bin/opencode $PREFIX/bin/opencode.bin
             # If the zip includes a debug variant (opencode-debug / opencode-debug.bin):
@@ -334,14 +335,19 @@ jobs:
             ```
 
             ### Android compatibility fix
-            This release includes fixes for two Android 11+ issues:
+            This release includes fixes for Android 11+ crashes and hangs:
             1. "Pointer tag ... was truncated" SIGABRT — a preloaded library disables
                bionic's software heap tagging before JavaScriptCore initialises,
                preventing the tag-mismatch abort on free().
-            2. Hang with no TUI output — Bun's JIT-compiled modules need
-               libc++_shared.so, which Android's /system/lib64/ does not provide.
-               The package now ships libc++_shared.so and the wrapper sets
-               LD_LIBRARY_PATH so the linker can find it.
+            2. Hang with no TUI output — Bun's virtual `/$bunfs/root/...` paths are
+               not intercepted by the Android runtime, so opentui's renderer library
+               and bun-pty's PTY library could not be loaded from the standalone
+               binary. The package now ships `libopentui.so` and
+               `librust_pty_arm64.so` as real files, and the wrapper sets
+               `OPENTUI_LIB_PATH` / `BUN_PTY_LIB` so they load from the filesystem.
+            3. Bun's JIT-compiled modules need `libc++_shared.so`, which Android's
+               /system/lib64/ does not provide. The package ships `libc++_shared.so`
+               and the wrapper sets `LD_LIBRARY_PATH` so the linker can find it.
 
             If opencode still crashes with a **Zig panic** (e.g. "integer does not fit
             in destination type"), run `opencode-debug` instead and paste the full

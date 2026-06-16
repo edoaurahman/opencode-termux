@@ -13,6 +13,8 @@
 #   libexec/opencode/opencode.bin — real opencode ELF binary
 #   lib/libtagfix.so              — disables Android bionic TBI heap tagging at process start
 #   lib/libc++_shared.so          — NDK C++ runtime needed by Bun's JIT-compiled modules
+#   lib/libopentui.so             — opentui TUI renderer library (ARM64)
+#   lib/librust_pty_arm64.so      — bun-pty PTY library (ARM64)
 #
 # The wrapper + libtagfix.so fix "Pointer tag ... was truncated" SIGABRT on Android 11+.
 # Root cause: Bun/JSC NaN-boxing clears the top byte of heap pointers; bionic's default
@@ -20,6 +22,10 @@
 # Fix: mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE) called via an
 # LD_PRELOAD constructor *inside* the opencode process (execv-based wrappers don't work
 # because execv resets the tagging level on the new image).
+#
+# libopentui.so and librust_pty_arm64.so are shipped as real files because Bun's
+# /$bunfs/root/ virtual file system is not intercepted by the Android runtime, so
+# dlopen/openat on embedded paths returns ENOENT.
 #
 # ZIP install (flat layout — wrapper resolves siblings via $dir):
 #   unzip opencode-...-android-aarch64.zip -d $PREFIX/bin/
@@ -37,6 +43,7 @@ WRAPPER_SCRIPT="$REPO_ROOT/bin/opencode"
 DEBUG_WRAPPER_SCRIPT="$REPO_ROOT/bin/opencode-debug"
 TAGFIX_SRC="$REPO_ROOT/src/libtagfix.c"
 PKG_DIR="$WORK_DIR/packages"
+ARM64_LIBOPENTUI="$DIST_DIR/libopentui.so"
 
 if [ ! -f "$OPENCODE_BINARY" ]; then
     echo "ERROR: OpenCode binary not found at $OPENCODE_BINARY"
@@ -52,6 +59,29 @@ fi
 if [ ! -f "$TAGFIX_SRC" ]; then
     echo "ERROR: libtagfix.c not found at $TAGFIX_SRC"
     exit 1
+fi
+
+if [ ! -f "$ARM64_LIBOPENTUI" ]; then
+    echo "ERROR: ARM64 libopentui.so not found at $ARM64_LIBOPENTUI"
+    echo "       Run scripts/build-opencode.sh first."
+    exit 1
+fi
+
+# Locate bun-pty's ARM64 PTY library (shipped with the npm package)
+RUST_PTY_ARM64=""
+for candidate in \
+    "$OPENCODE_SRC/node_modules/bun-pty/rust-pty/target/release/librust_pty_arm64.so" \
+    "$OPENCODE_PKG/node_modules/bun-pty/rust-pty/target/release/librust_pty_arm64.so" \
+    "$REPO_ROOT/node_modules/bun-pty/rust-pty/target/release/librust_pty_arm64.so"
+do
+    if [ -f "$candidate" ]; then
+        RUST_PTY_ARM64="$candidate"
+        break
+    fi
+done
+
+if [ -z "$RUST_PTY_ARM64" ]; then
+    echo "WARNING: librust_pty_arm64.so not found; PTY features may not work"
 fi
 
 echo "=== Creating packages for OpenCode v${OPENCODE_VERSION} ==="
@@ -85,7 +115,23 @@ cp "$LIBCPP_SHARED_SRC" "$PKG_DIR/libc++_shared.so"
 LIBCPP_SIZE=$(stat -c%s "$PKG_DIR/libc++_shared.so")
 echo "    Copied $(stat -c%s "$PKG_DIR/libc++_shared.so") bytes"
 
-INSTALLED_SIZE=$(( (BINARY_SIZE + TAGFIX_SIZE + LIBCPP_SIZE + 8192) / 1024 ))  # rough kB estimate
+# libopentui.so must be shipped as a real file because Bun's /$bunfs/root/
+# virtual paths are not intercepted on Android.
+echo ">>> Copying libopentui.so..."
+cp "$ARM64_LIBOPENTUI" "$PKG_DIR/libopentui.so"
+LIBOPENTUI_SIZE=$(stat -c%s "$PKG_DIR/libopentui.so")
+echo "    Copied $(stat -c%s "$PKG_DIR/libopentui.so") bytes"
+
+# librust_pty_arm64.so is also needed as a real file on Android.
+RUST_PTY_SIZE=0
+if [ -n "$RUST_PTY_ARM64" ]; then
+    echo ">>> Copying librust_pty_arm64.so..."
+    cp "$RUST_PTY_ARM64" "$PKG_DIR/librust_pty_arm64.so"
+    RUST_PTY_SIZE=$(stat -c%s "$PKG_DIR/librust_pty_arm64.so")
+    echo "    Copied $(stat -c%s "$PKG_DIR/librust_pty_arm64.so") bytes"
+fi
+
+INSTALLED_SIZE=$(( (BINARY_SIZE + TAGFIX_SIZE + LIBCPP_SIZE + LIBOPENTUI_SIZE + RUST_PTY_SIZE + 8192) / 1024 ))  # rough kB estimate
 
 # ==========================================
 # 1. ZIP package (flat layout)
@@ -100,7 +146,11 @@ cp "$OPENCODE_BINARY" "$PKG_DIR/opencode.bin"
 cp "$WRAPPER_SCRIPT"  "$PKG_DIR/opencode"
 chmod 755 "$PKG_DIR/opencode" "$PKG_DIR/opencode.bin"
 cd "$PKG_DIR"
-zip -9 "$PKG_DIR/$ZIP_NAME" opencode opencode.bin libtagfix.so libc++_shared.so
+ZIP_FILES="opencode opencode.bin libtagfix.so libc++_shared.so libopentui.so"
+if [ -f "$PKG_DIR/librust_pty_arm64.so" ]; then
+    ZIP_FILES="$ZIP_FILES librust_pty_arm64.so"
+fi
+zip -9 "$PKG_DIR/$ZIP_NAME" $ZIP_FILES
 
 # Add debug variant to the same ZIP if it was built
 if [ -f "$OPENCODE_DEBUG_BINARY" ] && [ -f "$DEBUG_WRAPPER_SCRIPT" ]; then
@@ -132,6 +182,14 @@ chmod 644 "$PACMAN_USR/lib/libtagfix.so"
 
 cp "$PKG_DIR/libc++_shared.so" "$PACMAN_USR/lib/libc++_shared.so"
 chmod 644 "$PACMAN_USR/lib/libc++_shared.so"
+
+cp "$PKG_DIR/libopentui.so" "$PACMAN_USR/lib/libopentui.so"
+chmod 644 "$PACMAN_USR/lib/libopentui.so"
+
+if [ -f "$PKG_DIR/librust_pty_arm64.so" ]; then
+    cp "$PKG_DIR/librust_pty_arm64.so" "$PACMAN_USR/lib/librust_pty_arm64.so"
+    chmod 644 "$PACMAN_USR/lib/librust_pty_arm64.so"
+fi
 
 # Create .PKGINFO
 cat > "$PACMAN_STAGING/.PKGINFO" << EOF
@@ -176,6 +234,14 @@ chmod 644 "$DEB_USR/lib/libtagfix.so"
 
 cp "$PKG_DIR/libc++_shared.so" "$DEB_USR/lib/libc++_shared.so"
 chmod 644 "$DEB_USR/lib/libc++_shared.so"
+
+cp "$PKG_DIR/libopentui.so" "$DEB_USR/lib/libopentui.so"
+chmod 644 "$DEB_USR/lib/libopentui.so"
+
+if [ -f "$PKG_DIR/librust_pty_arm64.so" ]; then
+    cp "$PKG_DIR/librust_pty_arm64.so" "$DEB_USR/lib/librust_pty_arm64.so"
+    chmod 644 "$DEB_USR/lib/librust_pty_arm64.so"
+fi
 
 # Create control file
 cat > "$DEB_STAGING/DEBIAN/control" << EOF
@@ -222,6 +288,7 @@ echo ""
 echo "  Standalone (zip) — installs wrapper + binary + libs into bin/:"
 echo "    unzip $ZIP_NAME -d \$PREFIX/bin/"
 echo "    chmod +x \$PREFIX/bin/opencode \$PREFIX/bin/opencode.bin"
+echo "    # shipped libraries: libtagfix.so libc++_shared.so libopentui.so librust_pty_arm64.so"
 echo ""
 echo "  Debug variant (if included in zip) — use when opencode crashes with a Zig panic:"
 echo "    chmod +x \$PREFIX/bin/opencode-debug \$PREFIX/bin/opencode-debug.bin"

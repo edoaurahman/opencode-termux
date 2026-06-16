@@ -14,28 +14,32 @@ set -e
 
 dir="$(cd "$(dirname "$0")" && pwd)"
 
-# Locate libtagfix.so
-TAGFIX=""
+# Locate the native libraries we ship alongside the wrapper.
+# In the flat zip layout they sit next to the wrapper; in the Termux package
+# layout they are under ../lib.
+NATIVE_LIB_DIR=""
 for candidate in \
-    "$dir/libtagfix.so" \
-    "$dir/../lib/libtagfix.so" \
-    "${PREFIX:-/data/data/com.termux/files/usr}/lib/libtagfix.so"
+    "$dir" \
+    "$dir/../lib" \
+    "${PREFIX:-/data/data/com.termux/files/usr}/lib"
 do
-    if [ -f "$candidate" ]; then
-        TAGFIX="$candidate"
+    if [ -f "$candidate/libtagfix.so" ]; then
+        NATIVE_LIB_DIR="$candidate"
         break
     fi
 done
 
-if [ -n "$TAGFIX" ]; then
-    export LD_PRELOAD="${TAGFIX}${LD_PRELOAD:+:$LD_PRELOAD}"
+if [ -n "$NATIVE_LIB_DIR" ]; then
+    export LD_PRELOAD="${NATIVE_LIB_DIR}/libtagfix.so${LD_PRELOAD:+:$LD_PRELOAD}"
     # Bun's JIT-compiled modules need libc++_shared.so. Android's /system/lib64/
-    # does not contain it, so point the linker at the directory where we ship it
-    # (co-located with libtagfix.so in both flat zip and installed layouts).
-    TAGFIX_DIR="$(dirname "$TAGFIX")"
-    export LD_LIBRARY_PATH="${TAGFIX_DIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    # does not contain it, so point the linker at the directory where we ship it.
+    export LD_LIBRARY_PATH="${NATIVE_LIB_DIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    # Bun's /$bunfs/root/ virtual paths are not intercepted on Android, so load
+    # opentui's renderer library and bun-pty's PTY library from the real filesystem.
+    export OPENTUI_LIB_PATH="${NATIVE_LIB_DIR}/libopentui.so"
+    export BUN_PTY_LIB="${NATIVE_LIB_DIR}/librust_pty_arm64.so"
 else
-    echo "opencode-debug: warning: libtagfix.so not found, may crash on Android 11+" >&2
+    echo "opencode-debug: warning: native library directory not found, may crash on Android 11+" >&2
 fi
 
 # Locate opencode-debug.bin
