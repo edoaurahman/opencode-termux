@@ -216,6 +216,26 @@ mkdir -p "$DIST_DIR"
 cp "$ARM64_LIBOPENTUI" "$DIST_DIR/libopentui.so"
 echo ">>> Staged ARM64 libopentui.so for packaging"
 
+# Stage ARM64 librust_pty_arm64.so for packaging if available.
+# bun-pty ships a prebuilt ARM64 .so; make-packages.sh will include it so
+# PTY features work on Android (Bun's /$bunfs/root/ paths are not intercepted).
+RUST_PTY_ARM64_CANDIDATE=""
+for candidate in \
+    "$OPENCODE_SRC/node_modules/bun-pty/rust-pty/target/release/librust_pty_arm64.so" \
+    "$OPENCODE_PKG/node_modules/bun-pty/rust-pty/target/release/librust_pty_arm64.so"
+do
+    if [ -f "$candidate" ]; then
+        RUST_PTY_ARM64_CANDIDATE="$candidate"
+        break
+    fi
+done
+if [ -n "$RUST_PTY_ARM64_CANDIDATE" ]; then
+    cp "$RUST_PTY_ARM64_CANDIDATE" "$DIST_DIR/librust_pty_arm64.so"
+    echo ">>> Staged ARM64 librust_pty_arm64.so for packaging"
+else
+    echo ">>> WARNING: librust_pty_arm64.so not found; PTY features may not work"
+fi
+
 # Verify output
 OPENCODE_BINARY="$DIST_DIR/opencode"
 if [ ! -f "$OPENCODE_BINARY" ]; then

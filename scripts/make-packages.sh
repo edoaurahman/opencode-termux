@@ -88,8 +88,10 @@ check_elf_aarch64() {
 check_elf_aarch64 "$ARM64_LIBOPENTUI" "libopentui.so"
 
 # Locate bun-pty's ARM64 PTY library (shipped with the npm package)
+OPENCODE_PKG="${OPENCODE_PKG:-$OPENCODE_SRC/packages/opencode}"
 RUST_PTY_ARM64=""
 for candidate in \
+    "$DIST_DIR/librust_pty_arm64.so" \
     "$OPENCODE_SRC/node_modules/bun-pty/rust-pty/target/release/librust_pty_arm64.so" \
     "$OPENCODE_PKG/node_modules/bun-pty/rust-pty/target/release/librust_pty_arm64.so" \
     "$REPO_ROOT/node_modules/bun-pty/rust-pty/target/release/librust_pty_arm64.so"
@@ -99,8 +101,6 @@ do
         break
     fi
 done
-
-OPENCODE_PKG="$OPENCODE_SRC/packages/opencode"
 
 if [ -z "$RUST_PTY_ARM64" ]; then
     echo "WARNING: librust_pty_arm64.so not found; PTY features may not work"
