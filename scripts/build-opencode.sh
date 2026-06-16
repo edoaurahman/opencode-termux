@@ -111,11 +111,6 @@ IDXEOF
     fi
 done
 
-# Also stage libopentui.so into dist so make-packages.sh can ship it
-mkdir -p "$DIST_DIR"
-cp "$ARM64_LIBOPENTUI" "$DIST_DIR/libopentui.so"
-echo ">>> Staged ARM64 libopentui.so for packaging"
-
 # Run the TypeScript build script
 # Copy it into the OpenCode tree so Bun can resolve @opentui/solid/bun-plugin
 # from node_modules (Bun resolves bare imports relative to the script file's location)
@@ -213,6 +208,13 @@ else
     echo ">>> bun-profile not found, skipping debug variant"
     echo "    (run 'ninja bun-profile' in the bun-build dir to enable it)"
 fi
+
+# Stage ARM64 libopentui.so for packaging. This MUST happen after the
+# TypeScript build script because build-opencode-android.ts clears OUTPUT_DIR
+# (which is DIST_DIR) at the start of its run.
+mkdir -p "$DIST_DIR"
+cp "$ARM64_LIBOPENTUI" "$DIST_DIR/libopentui.so"
+echo ">>> Staged ARM64 libopentui.so for packaging"
 
 # Verify output
 OPENCODE_BINARY="$DIST_DIR/opencode"
