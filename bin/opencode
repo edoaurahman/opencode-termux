@@ -38,6 +38,13 @@ if [ -n "$NATIVE_LIB_DIR" ]; then
     # opentui's renderer library and bun-pty's PTY library from the real filesystem.
     export OPENTUI_LIB_PATH="${NATIVE_LIB_DIR}/libopentui.so"
     export BUN_PTY_LIB="${NATIVE_LIB_DIR}/librust_pty_arm64.so"
+    # @parcel/watcher only bundles the host-arch native binding in our build;
+    # disable it on Android/Termux to avoid a dlopen architecture mismatch.
+    export OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER="${OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER:-true}"
+    # If a real Bun binary is shipped next to opencode, use it for plugin installs.
+    if [ -x "$NATIVE_LIB_DIR/bun" ]; then
+        export OPENCODE_BUN_PATH="$NATIVE_LIB_DIR/bun"
+    fi
 else
     echo "opencode: warning: native library directory not found, may crash on Android 11+" >&2
 fi

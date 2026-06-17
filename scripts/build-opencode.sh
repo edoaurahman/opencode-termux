@@ -111,6 +111,55 @@ IDXEOF
     fi
 done
 
+# Patch OpenCode source for Android/Termux runtime constraints.
+# We cannot modify the upstream source directly, so apply local patches here.
+echo ">>> Patching OpenCode source for Android/Termux..."
+
+# 1. Disable the file watcher on Android/Termux.
+#    @parcel/watcher bundles the host (x86_64) native binding on a Linux build
+#    machine, which dlopen's on ARM64 Android and crashes. Until the ARM64
+#    binding is bundled, simply disable file watching.
+WATCHER_TS="$OPENCODE_PKG/src/file/watcher.ts"
+if [ -f "$WATCHER_TS" ]; then
+    if ! grep -q "TERMUX_VERSION" "$WATCHER_TS"; then
+        perl -i -pe '
+            s/^(\s*const watcher = lazy\(\(\): typeof import\("(.*)"\) \| undefined => \{)/$1\n    if (process.env.TERMUX_VERSION \|\| process.env.ANDROID_ROOT) {\n      log.info("file watcher disabled on Android\/Termux")\n      return\n    }/
+        ' "$WATCHER_TS"
+        echo "    Patched $WATCHER_TS (disable file watcher on Android)"
+    else
+        echo "    $WATCHER_TS already patched"
+    fi
+fi
+
+# 2. Skip config-dir dependency installs on Android/Termux.
+#    In a bun build --compile binary, process.execPath is the compiled opencode
+#    binary, so `bun install` becomes `opencode.bin install`, which fails.
+#    User plugins are not supported in the Termux build anyway.
+CONFIG_TS="$OPENCODE_PKG/src/config/config.ts"
+if [ -f "$CONFIG_TS" ]; then
+    if ! grep -q "TERMUX_VERSION" "$CONFIG_TS"; then
+        perl -i -pe '
+            s/^(\s*export async function installDependencies\(dir: string, input\?: InstallInput\) \{)/$1\n    if (process.env.TERMUX_VERSION \|\| process.env.ANDROID_ROOT) {\n      log.info("skipping dependency install on Android\/Termux", { dir })\n      return\n    }/
+        ' "$CONFIG_TS"
+        echo "    Patched $CONFIG_TS (skip dependency install on Android)"
+    else
+        echo "    $CONFIG_TS already patched"
+    fi
+fi
+
+# 3. Allow BunProc.which() to use a real bun binary if one is shipped.
+BUNPROC_TS="$OPENCODE_PKG/src/bun/index.ts"
+if [ -f "$BUNPROC_TS" ]; then
+    if ! grep -q "OPENCODE_BUN_PATH" "$BUNPROC_TS"; then
+        perl -i -0777 -pe '
+            s/  export function which\(\) \{\n    return process\.execPath\n  \}/  export function which() {\n    return process.env.OPENCODE_BUN_PATH \|\| process.execPath\n  }/
+        ' "$BUNPROC_TS"
+        echo "    Patched $BUNPROC_TS (OPENCODE_BUN_PATH support)"
+    else
+        echo "    $BUNPROC_TS already patched"
+    fi
+fi
+
 # Run the TypeScript build script
 # Copy it into the OpenCode tree so Bun can resolve @opentui/solid/bun-plugin
 # from node_modules (Bun resolves bare imports relative to the script file's location)
