@@ -5,14 +5,15 @@
 #
 # This script:
 # 1. Clones OpenCode if needed
-# 2. Swaps x86_64 libopentui.so with ARM64 version
-# 3. Runs the TypeScript build script to create the standalone binary
-# 4. Restores original libopentui.so
+# 2. Downloads the matching @opentui/core-linux-arm64 npm package
+# 3. Synthesizes @opentui/core-linux-arm64 in node_modules for ARM64 Android
+# 4. Runs the TypeScript build script to create the standalone binary
+# 5. Restores original @opentui/core-linux-x64 files
 #
 # Requires:
 # - Android Bun binary built (scripts/build-bun.sh)
-# - libopentui.so built (scripts/build-opentui.sh)
 # - Host Bun installed (for bundling)
+# - jq and curl installed (for fetching the matching npm package)
 
 set -euo pipefail
 
@@ -46,14 +47,39 @@ if [ ! -f "$ANDROID_BUN" ]; then
     exit 1
 fi
 
-# Find ARM64 libopentui.so
-# build.zig installs to ../lib/{target} relative to the zig dir
-ARM64_LIBOPENTUI="$OPENTUI_SRC/packages/core/src/lib/aarch64-linux-android/libopentui.so"
-if [ ! -f "$ARM64_LIBOPENTUI" ]; then
-    echo "ERROR: ARM64 libopentui.so not found at $ARM64_LIBOPENTUI"
-    echo "       Run scripts/build-opentui.sh first."
+# Download the prebuilt ARM64 libopentui.so from npm that matches the
+# @opentui/core version required by OpenCode. The cross-compiled .so from
+# scripts/build-opentui.sh is built from opentui HEAD and is ABI-incompatible
+# with the version of @opentui/core that opencode depends on.
+echo ">>> Fetching matching @opentui/core-linux-arm64 from npm..."
+OPENTUI_CORE_PKG_JSON=""
+for candidate in \
+    "$OPENCODE_PKG/node_modules/@opentui/core/package.json" \
+    "$OPENCODE_SRC/node_modules/@opentui/core/package.json"
+do
+    if [ -f "$candidate" ]; then
+        OPENTUI_CORE_PKG_JSON="$candidate"
+        break
+    fi
+done
+if [ -z "$OPENTUI_CORE_PKG_JSON" ]; then
+    echo "ERROR: @opentui/core not installed. Run bun install first."
     exit 1
 fi
+OPENTUI_CORE_VERSION=$(jq -r '.version' "$OPENTUI_CORE_PKG_JSON")
+echo "    @opentui/core version: $OPENTUI_CORE_VERSION"
+
+OPENTUI_ARM64_TARBALL_DIR=$(mktemp -d)
+trap 'rm -rf "$OPENTUI_ARM64_TARBALL_DIR"' EXIT
+OPENTUI_ARM64_TARBALL="$OPENTUI_ARM64_TARBALL_DIR/core-linux-arm64-${OPENTUI_CORE_VERSION}.tgz"
+curl -fsSL "https://registry.npmjs.org/@opentui/core-linux-arm64/-/core-linux-arm64-${OPENTUI_CORE_VERSION}.tgz" -o "$OPENTUI_ARM64_TARBALL"
+tar -xzf "$OPENTUI_ARM64_TARBALL" -C "$OPENTUI_ARM64_TARBALL_DIR"
+ARM64_LIBOPENTUI="$OPENTUI_ARM64_TARBALL_DIR/package/libopentui.so"
+if [ ! -f "$ARM64_LIBOPENTUI" ]; then
+    echo "ERROR: libopentui.so not found in downloaded npm package"
+    exit 1
+fi
+echo "    Downloaded ARM64 libopentui.so ($(du -h "$ARM64_LIBOPENTUI" | cut -f1))"
 
 # Find all @opentui/core-linux-x64 package directories under node_modules.
 # We must patch every occurrence because Bun's module resolver can pick up
@@ -119,10 +145,10 @@ CORE_LINUX_ARM64_DIR="$OPENCODE_SRC/node_modules/@opentui/core-linux-arm64"
 if [ ! -d "$CORE_LINUX_ARM64_DIR" ]; then
     echo ">>> Creating @opentui/core-linux-arm64 package..."
     mkdir -p "$CORE_LINUX_ARM64_DIR"
-    cat > "$CORE_LINUX_ARM64_DIR/package.json" <<'EOF'
+    cat > "$CORE_LINUX_ARM64_DIR/package.json" <<EOF
 {
   "name": "@opentui/core-linux-arm64",
-  "version": "0.4.1",
+  "version": "$OPENTUI_CORE_VERSION",
   "main": "index.js",
   "license": "MIT"
 }
@@ -133,7 +159,15 @@ module.exports = process.env.OPENTUI_LIB_PATH || "/data/data/com.termux/files/us
 EOF
     echo "    Created $CORE_LINUX_ARM64_DIR"
 else
-    echo ">>> @opentui/core-linux-arm64 already exists, patching index.js..."
+    echo ">>> @opentui/core-linux-arm64 already exists, updating .so and version..."
+    cat > "$CORE_LINUX_ARM64_DIR/package.json" <<EOF
+{
+  "name": "@opentui/core-linux-arm64",
+  "version": "$OPENTUI_CORE_VERSION",
+  "main": "index.js",
+  "license": "MIT"
+}
+EOF
     cp "$ARM64_LIBOPENTUI" "$CORE_LINUX_ARM64_DIR/libopentui.so"
     cat > "$CORE_LINUX_ARM64_DIR/index.js" <<'EOF'
 module.exports = process.env.OPENTUI_LIB_PATH || "/data/data/com.termux/files/usr/lib/libopentui.so";
