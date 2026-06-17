@@ -111,6 +111,35 @@ IDXEOF
     fi
 done
 
+# Synthesize @opentui/core-linux-arm64 so opentui's platform detection resolves
+# the correct package on Android/Termux arm64. The host build only installs
+# core-linux-x64, so the arm64 optional dependency is missing. Without this,
+# zig.ts throws "opentui is not supported on the current platform: linux-arm64".
+CORE_LINUX_ARM64_DIR="$OPENCODE_SRC/node_modules/@opentui/core-linux-arm64"
+if [ ! -d "$CORE_LINUX_ARM64_DIR" ]; then
+    echo ">>> Creating @opentui/core-linux-arm64 package..."
+    mkdir -p "$CORE_LINUX_ARM64_DIR"
+    cat > "$CORE_LINUX_ARM64_DIR/package.json" <<'EOF'
+{
+  "name": "@opentui/core-linux-arm64",
+  "version": "0.4.1",
+  "main": "index.js",
+  "license": "MIT"
+}
+EOF
+    cp "$ARM64_LIBOPENTUI" "$CORE_LINUX_ARM64_DIR/libopentui.so"
+    cat > "$CORE_LINUX_ARM64_DIR/index.js" <<'EOF'
+module.exports = process.env.OPENTUI_LIB_PATH || "/data/data/com.termux/files/usr/lib/libopentui.so";
+EOF
+    echo "    Created $CORE_LINUX_ARM64_DIR"
+else
+    echo ">>> @opentui/core-linux-arm64 already exists, patching index.js..."
+    cp "$ARM64_LIBOPENTUI" "$CORE_LINUX_ARM64_DIR/libopentui.so"
+    cat > "$CORE_LINUX_ARM64_DIR/index.js" <<'EOF'
+module.exports = process.env.OPENTUI_LIB_PATH || "/data/data/com.termux/files/usr/lib/libopentui.so";
+EOF
+fi
+
 # Patch OpenCode source for Android/Termux runtime constraints.
 # We cannot modify the upstream source directly, so apply local patches here.
 echo ">>> Patching OpenCode source for Android/Termux..."

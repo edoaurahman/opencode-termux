@@ -157,7 +157,7 @@ if [ -n "$RUST_PTY_ARM64" ]; then
     echo "    Copied $(stat -c%s "$PKG_DIR/librust_pty_arm64.so") bytes"
 fi
 
-INSTALLED_SIZE=$(( (BINARY_SIZE + TAGFIX_SIZE + LIBCPP_SIZE + LIBOPENTUI_SIZE + RUST_PTY_SIZE + 8192) / 1024 ))  # rough kB estimate
+INSTALLED_SIZE=$(( (BINARY_SIZE + TAGFIX_SIZE + LIBOPENTUI_SIZE + RUST_PTY_SIZE + 8192) / 1024 ))  # rough kB estimate
 
 # ==========================================
 # 1. ZIP package (flat layout)
@@ -206,9 +206,6 @@ chmod 755 "$PACMAN_USR/libexec/opencode/opencode.bin"
 cp "$TAGFIX_SO" "$PACMAN_USR/lib/libtagfix.so"
 chmod 644 "$PACMAN_USR/lib/libtagfix.so"
 
-cp "$PKG_DIR/libc++_shared.so" "$PACMAN_USR/lib/libc++_shared.so"
-chmod 644 "$PACMAN_USR/lib/libc++_shared.so"
-
 cp "$PKG_DIR/libopentui.so" "$PACMAN_USR/lib/libopentui.so"
 chmod 644 "$PACMAN_USR/lib/libopentui.so"
 
@@ -229,6 +226,7 @@ size = ${INSTALLED_SIZE}
 arch = aarch64
 license = MIT
 depend = ripgrep
+depend = libc++
 EOF
 
 PACMAN_NAME="opencode-${OPENCODE_VERSION}-1-aarch64.pkg.tar.xz"
@@ -258,9 +256,6 @@ chmod 755 "$DEB_USR/libexec/opencode/opencode.bin"
 cp "$TAGFIX_SO" "$DEB_USR/lib/libtagfix.so"
 chmod 644 "$DEB_USR/lib/libtagfix.so"
 
-cp "$PKG_DIR/libc++_shared.so" "$DEB_USR/lib/libc++_shared.so"
-chmod 644 "$DEB_USR/lib/libc++_shared.so"
-
 cp "$PKG_DIR/libopentui.so" "$DEB_USR/lib/libopentui.so"
 chmod 644 "$DEB_USR/lib/libopentui.so"
 
@@ -276,7 +271,7 @@ Version: ${OPENCODE_VERSION}
 Architecture: aarch64
 Maintainer: Guy Sheffer <guysoft@gmail.com>
 Installed-Size: ${INSTALLED_SIZE}
-Depends: ripgrep
+Depends: ripgrep, libc++
 Section: utils
 Priority: optional
 Homepage: https://github.com/anomalyco/opencode
@@ -314,7 +309,8 @@ echo ""
 echo "  Standalone (zip) — installs wrapper + binary + libs into bin/:"
 echo "    unzip $ZIP_NAME -d \$PREFIX/bin/"
 echo "    chmod +x \$PREFIX/bin/opencode \$PREFIX/bin/opencode.bin"
-echo "    # shipped libraries: libtagfix.so libc++_shared.so libopentui.so librust_pty_arm64.so"
+echo "    # shipped libraries: libtagfix.so libc++_shared.so libopentui.so librust_pty_arm64.so
+    # (pacman/deb rely on Termux's own libc++_shared.so package instead)"
 echo ""
 echo "  Debug variant (if included in zip) — use when opencode crashes with a Zig panic:"
 echo "    chmod +x \$PREFIX/bin/opencode-debug \$PREFIX/bin/opencode-debug.bin"
