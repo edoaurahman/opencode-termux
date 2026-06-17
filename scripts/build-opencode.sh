@@ -223,6 +223,23 @@ if [ -f "$BUNPROC_TS" ]; then
     fi
 fi
 
+# 4. Add diagnostic logging around createCliRenderer/render in the TUI app.
+#    The TUI hangs on Android with no output; we need to know whether
+#    createCliRenderer succeeds, throws, or never returns.
+APP_TSX="$OPENCODE_PKG/src/cli/cmd/tui/app.tsx"
+if [ -f "$APP_TSX" ]; then
+    if ! grep -q "OPENCODE_ANDROID_DIAG" "$APP_TSX"; then
+        perl -i -0777 -pe '
+            s/(const renderer = await createCliRenderer\(rendererConfig\(input\.config\)\))/console.error("[OPENCODE_ANDROID_DIAG] before createCliRenderer");\n    $1/;
+            s/(await createCliRenderer\(rendererConfig\(input\.config\)\))/await createCliRenderer(rendererConfig(input.config)).then((r) => {\n      console.error("[OPENCODE_ANDROID_DIAG] createCliRenderer resolved");\n      return r;\n    }).catch((e) => {\n      console.error("[OPENCODE_ANDROID_DIAG] createCliRenderer rejected:", e);\n      throw e;\n    })/;
+            s/(await render\(\(\) => \{)/console.error("[OPENCODE_ANDROID_DIAG] before render");\n    await render(() => {/;
+        ' "$APP_TSX"
+        echo "    Patched $APP_TSX (TUI diagnostics)"
+    else
+        echo "    $APP_TSX already patched"
+    fi
+fi
+
 # Run the TypeScript build script
 # Copy it into the OpenCode tree so Bun can resolve @opentui/solid/bun-plugin
 # from node_modules (Bun resolves bare imports relative to the script file's location)

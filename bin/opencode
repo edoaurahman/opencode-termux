@@ -18,10 +18,13 @@ dir="$(cd "$(dirname "$0")" && pwd)"
 # In the flat zip layout they sit next to the wrapper; in the Termux package
 # layout they are under ../lib.
 NATIVE_LIB_DIR=""
+# Prefer the installed package layout (libs under ../lib) over the flat zip
+# layout (libs next to the wrapper). This avoids picking up stale libraries
+# that may have been left behind by an earlier manual extraction into bin/.
 for candidate in \
-    "$dir" \
     "$dir/../lib" \
-    "${PREFIX:-/data/data/com.termux/files/usr}/lib"
+    "${PREFIX:-/data/data/com.termux/files/usr}/lib" \
+    "$dir"
 do
     if [ -f "$candidate/libtagfix.so" ]; then
         NATIVE_LIB_DIR="$candidate"
