@@ -54,10 +54,23 @@ fi
 echo ">>> Locating ARM64 libopentui.so from opentui build..."
 
 # Determine the @opentui/core version OpenCode depends on for the synthesized
-# core-linux-arm64 package metadata.
-OPENTUI_CORE_PKG_JSON="$OPENCODE_SRC/node_modules/@opentui/core/package.json"
-if [ ! -f "$OPENTUI_CORE_PKG_JSON" ]; then
+# core-linux-arm64 package metadata. The package may be hoisted to the workspace
+# root or kept inside packages/opencode/node_modules.
+OPENTUI_CORE_PKG_JSON=""
+for candidate in \
+    "$OPENCODE_PKG/node_modules/@opentui/core/package.json" \
+    "$OPENCODE_SRC/node_modules/@opentui/core/package.json"
+do
+    if [ -f "$candidate" ]; then
+        OPENTUI_CORE_PKG_JSON="$candidate"
+        break
+    fi
+done
+if [ -z "$OPENTUI_CORE_PKG_JSON" ]; then
     echo "ERROR: @opentui/core not installed. Run bun install first."
+    echo "       Searched:"
+    echo "         $OPENCODE_PKG/node_modules/@opentui/core/package.json"
+    echo "         $OPENCODE_SRC/node_modules/@opentui/core/package.json"
     exit 1
 fi
 OPENTUI_CORE_VERSION=$(jq -r '.version' "$OPENTUI_CORE_PKG_JSON")
