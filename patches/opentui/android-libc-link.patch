@@ -1,106 +1,15 @@
 diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
-index 0c82ba3d..6feb5fac 100644
+index 1550ef2..bc1b165 100644
 --- a/packages/core/src/zig/build.zig
 +++ b/packages/core/src/zig/build.zig
-@@ -153,7 +153,25 @@ fn addMiniaudioShim(
-     };
- 
-     artifact.addIncludePath(b.path("."));
--    artifact.linkLibC();
-+    // linkLibC() fails for Android targets ("unable to provide libc for target").
-+    // Add NDK sysroot include paths manually and rely on the explicit libc.so
-+    // added as an object file in buildTarget.
-+    const shim_abi = target.result.abi;
-+    if (shim_abi == .android or shim_abi == .androideabi) {
-+        if (b.graph.env_map.get("ANDROID_NDK_HOME")) |ndk_home| {
-+            const sysroot = std.fmt.allocPrint(b.allocator, "{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot", .{ndk_home}) catch unreachable;
-+            // libc++ headers MUST come before Clang's resource-dir headers.
-+            // addSystemIncludePath -> -isystem (searched AFTER Clang's resource dir).
-+            // addIncludePath       -> -I       (searched BEFORE Clang's resource dir).
-+            // Zig's bundled Clang has its own stddef.h in the resource dir that does NOT
-+            // define _LIBCPP_STDDEF_H; using -I ensures NDK's c++/v1/stddef.h wins.
-+            artifact.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/usr/include/c++/v1", .{sysroot}) catch unreachable });
-+            artifact.addSystemIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/usr/include", .{sysroot}) catch unreachable });
-+            artifact.addSystemIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/usr/include/aarch64-linux-android", .{sysroot}) catch unreachable });
-+        }
-+    } else {
-+        artifact.linkLibC();
-+    }
-     artifact.addCSourceFile(.{
-         .file = b.path("miniaudio_shim.c"),
-         .flags = c_flags,
-@@ -190,17 +208,39 @@ fn addNativeAudioDependencies(
-     switch (target.result.os.tag) {
-         .macos => addMacOSSystemLibraries(b, artifact, macos_sdk_path.?),
-         .linux => {
--            artifact.linkSystemLibrary("dl");
--            artifact.linkSystemLibrary("pthread");
-+            // Android/Bionic folds dl and pthread into libc.so -- no separate stubs in the NDK.
-+            // Requesting them causes Zig to fail with "unable to find dynamic system library".
-+            const abi = target.result.abi;
-+            if (abi != .android and abi != .androideabi) {
-+                artifact.linkSystemLibrary("dl");
-+                artifact.linkSystemLibrary("pthread");
-+            }
-         },
-         else => {},
-     }
- }
- 
--fn addYogaDependencies(b: *std.Build, artifact: *std.Build.Step.Compile) void {
-+fn addYogaDependencies(b: *std.Build, artifact: *std.Build.Step.Compile, target: std.Build.ResolvedTarget) void {
-     const yoga_dep = b.dependency("yoga", .{});
- 
--    artifact.linkLibCpp();
-+    const abi = target.result.abi;
-+    if (abi == .android or abi == .androideabi) {
-+        // linkLibCpp() triggers link_libc=true -> "unable to provide libc for Android target".
-+        // Link libc++_shared.so directly from the NDK sysroot via addObjectFile instead,
-+        // which bypasses Zig's libc provision logic entirely.
-+        if (b.graph.env_map.get("ANDROID_NDK_HOME")) |ndk_home| {
-+            const cxx_path = std.fmt.allocPrint(
-+                b.allocator,
-+                "{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so",
-+                .{ndk_home},
-+            ) catch unreachable;
-+            artifact.addObjectFile(.{ .cwd_relative = cxx_path });
-+            // Note: c++/v1 include path is added first by addMiniaudioShim (which runs
-+            // before this function in buildTarget), so order is correct there.
-+        }
-+    } else {
-+        artifact.linkLibCpp();
-+    }
-     artifact.addIncludePath(yoga_dep.path(""));
-     artifact.addCSourceFiles(.{
-         .root = yoga_dep.path(""),
-@@ -320,7 +360,7 @@ pub fn build(b: *std.Build) void {
-         std.process.exit(1);
-     }
-     addNativeAudioDependencies(b, test_artifact, native_target, macos_sdk_path);
--    addYogaDependencies(b, test_artifact);
-+    addYogaDependencies(b, test_artifact, native_target);
- 
-     const run_test = b.addRunArtifact(test_artifact);
-     test_step.dependOn(&run_test.step);
-@@ -360,7 +400,7 @@ pub fn build(b: *std.Build) void {
-         std.process.exit(1);
-     }
-     addNativeAudioDependencies(b, bench_ffi_lib, native_target, macos_sdk_path);
--    addYogaDependencies(b, bench_ffi_lib);
-+    addYogaDependencies(b, bench_ffi_lib, native_target);
-     const install_bench_ffi = b.addInstallArtifact(bench_ffi_lib, .{});
-     bench_ffi_step.dependOn(&install_bench_ffi.step);
-     bench_step.dependOn(bench_ffi_step);
-@@ -492,7 +532,23 @@ fn buildTarget(
+@@ -273,6 +273,23 @@ fn buildTarget(
+         .linkage = .dynamic,
      });
  
-     addNativeAudioDependencies(b, lib, target, macos_sdk_path);
--    addYogaDependencies(b, lib);
-+    addYogaDependencies(b, lib, target);
-+
 +    // On Android, explicitly link the NDK libc.so stub so dlopen() can resolve
-+    // symbols like getauxval. Zig's linkLibC() is skipped for Android (see
-+    // addMiniaudioShim), so we need a direct NEEDED: libc.so entry.
++    // symbols such as getauxval. Zig does not add a NEEDED: libc.so entry for
++    // this library by default, and Android's dynamic linker will not use the
++    // process' already-loaded libc to satisfy unresolved symbols from dlopen().
 +    const os_tag = target.result.os.tag;
 +    const abi = target.result.abi;
 +    if (os_tag == .linux and (abi == .android or abi == .androideabi)) {
@@ -113,19 +22,7 @@ index 0c82ba3d..6feb5fac 100644
 +            lib.addObjectFile(.{ .cwd_relative = libc_path });
 +        }
 +    }
- 
++
      const install_dir = b.addInstallArtifact(lib, .{
          .dest_dir = .{
-diff --git a/packages/core/src/zig/yoga.zig b/packages/core/src/zig/yoga.zig
-index 3f8b4b5c..15c48804 100644
---- a/packages/core/src/zig/yoga.zig
-+++ b/packages/core/src/zig/yoga.zig
-@@ -86,7 +86,7 @@ const CallbackContext = struct {
- 
- const JsMeasureCallback = *const fn (?*anyopaque, f32, u32, f32, u32) callconv(.c) void;
- const JsDirtiedCallback = *const fn () callconv(.c) void;
--const callback_allocator = std.heap.c_allocator;
-+const callback_allocator = if (@import("builtin").target.abi == .android or @import("builtin").target.abi == .androideabi) std.heap.page_allocator else std.heap.c_allocator;
- var opentui_config: YGConfigRef = null;
- var opentui_config_mutex: std.Thread.Mutex = .{};
- 
+             .override = .{

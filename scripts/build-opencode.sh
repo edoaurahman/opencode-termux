@@ -84,6 +84,13 @@ if [ ! -f "$ARM64_LIBOPENTUI" ]; then
 fi
 echo "    Using ARM64 libopentui.so ($(du -h "$ARM64_LIBOPENTUI" | cut -f1))"
 
+is_android_shared_object() {
+    local file="$1"
+    local needed
+    needed=$(readelf -d "$file" 2>/dev/null | grep 'Shared library:' || true)
+    ! echo "$needed" | grep -Eq 'libc\.so\.6|libpthread\.so\.0|libdl\.so\.2|libutil\.so\.1'
+}
+
 # Find all @opentui/core-linux-x64 package directories under node_modules.
 # We must patch every occurrence because Bun's module resolver can pick up
 # the package from multiple hoisted locations, and the .so inside each one
@@ -361,9 +368,12 @@ do
         break
     fi
 done
-if [ -n "$RUST_PTY_ARM64_CANDIDATE" ]; then
+if [ -n "$RUST_PTY_ARM64_CANDIDATE" ] && is_android_shared_object "$RUST_PTY_ARM64_CANDIDATE"; then
     cp "$RUST_PTY_ARM64_CANDIDATE" "$DIST_DIR/librust_pty_arm64.so"
     echo ">>> Staged ARM64 librust_pty_arm64.so for packaging"
+elif [ -n "$RUST_PTY_ARM64_CANDIDATE" ]; then
+    rm -f "$DIST_DIR/librust_pty_arm64.so"
+    echo ">>> WARNING: found ARM64 librust_pty_arm64.so, but it is linked for Linux/glibc; omitting from Android package"
 else
     echo ">>> WARNING: librust_pty_arm64.so not found; PTY features may not work"
 fi

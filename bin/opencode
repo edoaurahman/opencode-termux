@@ -40,7 +40,9 @@ if [ -n "$NATIVE_LIB_DIR" ]; then
     # Bun's /$bunfs/root/ virtual paths are not intercepted on Android, so load
     # opentui's renderer library and bun-pty's PTY library from the real filesystem.
     export OPENTUI_LIB_PATH="${NATIVE_LIB_DIR}/libopentui.so"
-    export BUN_PTY_LIB="${NATIVE_LIB_DIR}/librust_pty_arm64.so"
+    if [ -f "${NATIVE_LIB_DIR}/librust_pty_arm64.so" ]; then
+        export BUN_PTY_LIB="${NATIVE_LIB_DIR}/librust_pty_arm64.so"
+    fi
     # @parcel/watcher only bundles the host-arch native binding in our build;
     # disable it on Android/Termux to avoid a dlopen architecture mismatch.
     export OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER="${OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER:-true}"
@@ -52,11 +54,12 @@ else
     echo "opencode: warning: native library directory not found, may crash on Android 11+" >&2
 fi
 
-# Locate opencode.bin
+# Locate opencode.bin. Prefer the package layout first so upgrades do not
+# accidentally execute a stale flat-layout binary left in $PREFIX/bin.
 for candidate in \
-    "$dir/opencode.bin" \
     "$dir/../libexec/opencode/opencode.bin" \
-    "${PREFIX:-/data/data/com.termux/files/usr}/libexec/opencode/opencode.bin"
+    "${PREFIX:-/data/data/com.termux/files/usr}/libexec/opencode/opencode.bin" \
+    "$dir/opencode.bin"
 do
     if [ -x "$candidate" ]; then
         exec "$candidate" "$@"

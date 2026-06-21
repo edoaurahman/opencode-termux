@@ -15,8 +15,8 @@ source "$SCRIPT_DIR/env.sh"
 ZIG_BIN="${ZIG_BIN:-zig}"
 
 # Pin opentui to the exact version that OpenCode depends on.
-# This commit corresponds to @opentui/core v0.1.95 and builds for Android
-# without patches (the v0.1.95 build.zig does not call linkLibC()).
+# This commit corresponds to @opentui/core v0.1.95. We still patch its Zig
+# build so the produced .so has a NEEDED: libc.so entry for Android dlopen().
 OPENTUI_COMMIT="ebe288e0e2c85d3c7cbb44b1e3600beb68e100a2"
 
 echo "=== Building libopentui.so for Android aarch64 ==="
@@ -39,12 +39,8 @@ else
     fi
 fi
 
-# The v0.1.95 build.zig cross-compiles for aarch64-linux-android without
-# patches because it does not call linkLibC() or other Zig features that
-# trigger "unable to provide libc" on Android/Bionic.
-# Keep the patch machinery commented out in case we need to re-pin later.
 OPENTUI_PATCH="$REPO_ROOT/patches/opentui/android-libc-link.patch"
-if [ -f "$OPENTUI_PATCH" ] && [ -n "${OPENTUI_FORCE_PATCH:-}" ]; then
+if [ -f "$OPENTUI_PATCH" ] && [ "${OPENTUI_SKIP_PATCH:-}" != "1" ]; then
     echo ">>> Applying opentui Android patch..."
     cd "$OPENTUI_SRC"
     if git apply --check "$OPENTUI_PATCH" 2>/dev/null; then
@@ -61,7 +57,7 @@ if [ -f "$OPENTUI_PATCH" ] && [ -n "${OPENTUI_FORCE_PATCH:-}" ]; then
         fi
     fi
 else
-    echo ">>> Skipping opentui Android patch (not needed for v0.1.95)"
+    echo ">>> Skipping opentui Android patch"
 fi
 
 OPENTUI_ZIG_DIR="$OPENTUI_SRC/packages/core/src/zig"
@@ -97,9 +93,20 @@ echo "Output: $LIBOPENTUI"
 echo "Size: $(du -h "$LIBOPENTUI" | cut -f1)"
 file "$LIBOPENTUI"
 
-# Show dynamic section for debugging.  v0.1.95's libopentui.so has no
-# NEEDED entries but loads correctly on Android/Bionic because all libc
-# symbols are resolved at load time from the Bionic libc that is already
-# mapped into every process.
+# Show dynamic section for debugging. Android builds must include
+# NEEDED: libc.so so dlopen() can resolve symbols such as getauxval.
 echo ">>> Dynamic section of libopentui.so:"
 readelf -d "$LIBOPENTUI" 2>/dev/null | grep -E "NEEDED|FLAGS|SONAME" || echo "    (no dynamic dependencies)"
+if ! readelf -d "$LIBOPENTUI" 2>/dev/null | grep -q 'Shared library: \[libc\.so\]'; then
+    echo ">>> Adding missing NEEDED: libc.so with patchelf..."
+    if ! command -v patchelf >/dev/null 2>&1; then
+        echo "ERROR: libopentui.so is missing NEEDED: libc.so and patchelf is unavailable"
+        exit 1
+    fi
+    patchelf --add-needed libc.so "$LIBOPENTUI"
+    readelf -d "$LIBOPENTUI" 2>/dev/null | grep -E "NEEDED|FLAGS|SONAME" || true
+    if ! readelf -d "$LIBOPENTUI" 2>/dev/null | grep -q 'Shared library: \[libc\.so\]'; then
+        echo "ERROR: failed to add NEEDED: libc.so"
+        exit 1
+    fi
+fi

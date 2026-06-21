@@ -14,7 +14,7 @@
 #   lib/libtagfix.so              — disables Android bionic TBI heap tagging at process start
 #   lib/libc++_shared.so          — NDK C++ runtime needed by Bun's JIT-compiled modules
 #   lib/libopentui.so             — opentui TUI renderer library (ARM64)
-#   lib/librust_pty_arm64.so      — bun-pty PTY library (ARM64)
+#   lib/librust_pty_arm64.so      — optional bun-pty PTY library (Android/Bionic ARM64 only)
 #
 # The wrapper + libtagfix.so fix "Pointer tag ... was truncated" SIGABRT on Android 11+.
 # Root cause: Bun/JSC NaN-boxing clears the top byte of heap pointers; bionic's default
@@ -23,9 +23,10 @@
 # LD_PRELOAD constructor *inside* the opencode process (execv-based wrappers don't work
 # because execv resets the tagging level on the new image).
 #
-# libopentui.so and librust_pty_arm64.so are shipped as real files because Bun's
-# /$bunfs/root/ virtual file system is not intercepted by the Android runtime, so
-# dlopen/openat on embedded paths returns ENOENT.
+# libopentui.so is shipped as a real file because Bun's /$bunfs/root/ virtual
+# file system is not intercepted by the Android runtime, so dlopen/openat on
+# embedded paths returns ENOENT. The PTY library is shipped only when an
+# Android/Bionic build is available.
 #
 # ZIP install (flat layout — wrapper resolves siblings via $dir):
 #   unzip opencode-...-android-aarch64.zip -d $PREFIX/bin/
@@ -85,7 +86,33 @@ check_elf_aarch64() {
     echo "    Verified $name is AArch64"
 }
 
+check_android_shared_object() {
+    local file="$1"
+    local name="$2"
+    local needed
+    needed=$(readelf -d "$file" 2>/dev/null | grep 'Shared library:' || true)
+    if echo "$needed" | grep -Eq 'libc\.so\.6|libpthread\.so\.0|libdl\.so\.2|libutil\.so\.1'; then
+        echo "ERROR: $name is linked against Linux/glibc libraries, not Android/Bionic:"
+        echo "$needed"
+        exit 1
+    fi
+    echo "    Verified $name has Android-compatible dynamic dependencies"
+}
+
+check_needed_library() {
+    local file="$1"
+    local name="$2"
+    local library="$3"
+    if ! readelf -d "$file" 2>/dev/null | grep -q "Shared library: \\[$library\\]"; then
+        echo "ERROR: $name is missing NEEDED: $library"
+        exit 1
+    fi
+    echo "    Verified $name declares NEEDED: $library"
+}
+
 check_elf_aarch64 "$ARM64_LIBOPENTUI" "libopentui.so"
+check_android_shared_object "$ARM64_LIBOPENTUI" "libopentui.so"
+check_needed_library "$ARM64_LIBOPENTUI" "libopentui.so" "libc.so"
 
 # Locate bun-pty's ARM64 PTY library (shipped with the npm package)
 OPENCODE_PKG="${OPENCODE_PKG:-$OPENCODE_SRC/packages/opencode}"
@@ -97,15 +124,20 @@ for candidate in \
     "$REPO_ROOT/node_modules/bun-pty/rust-pty/target/release/librust_pty_arm64.so"
 do
     if [ -f "$candidate" ]; then
+        if readelf -d "$candidate" 2>/dev/null | grep 'Shared library:' | grep -Eq 'libc\.so\.6|libpthread\.so\.0|libdl\.so\.2|libutil\.so\.1'; then
+            echo "WARNING: skipping Linux/glibc PTY library candidate: $candidate"
+            continue
+        fi
         RUST_PTY_ARM64="$candidate"
         break
     fi
 done
 
 if [ -z "$RUST_PTY_ARM64" ]; then
-    echo "WARNING: librust_pty_arm64.so not found; PTY features may not work"
+    echo "WARNING: Android-compatible librust_pty_arm64.so not found; PTY features may not work"
 else
     check_elf_aarch64 "$RUST_PTY_ARM64" "librust_pty_arm64.so"
+    check_android_shared_object "$RUST_PTY_ARM64" "librust_pty_arm64.so"
 fi
 
 echo "=== Creating packages for OpenCode v${OPENCODE_VERSION} ==="
@@ -309,7 +341,8 @@ echo ""
 echo "  Standalone (zip) — installs wrapper + binary + libs into bin/:"
 echo "    unzip $ZIP_NAME -d \$PREFIX/bin/"
 echo "    chmod +x \$PREFIX/bin/opencode \$PREFIX/bin/opencode.bin"
-echo "    # shipped libraries: libtagfix.so libc++_shared.so libopentui.so librust_pty_arm64.so
+echo "    # shipped libraries: libtagfix.so libc++_shared.so libopentui.so
+    # optional if available: librust_pty_arm64.so
     # (pacman/deb rely on Termux's own libc++_shared.so package instead)"
 echo ""
 echo "  Debug variant (if included in zip) — use when opencode crashes with a Zig panic:"
