@@ -312,6 +312,12 @@ if [ -f "$BASH_TOOL_TS" ]; then
         ' "$BASH_TOOL_TS"
         echo "    Patched $BASH_TOOL_TS (skip bash parse/permission scan on Android)"
     fi
+    if ! grep -q "OPENCODE_ANDROID_BASH_EXPLICIT_SHELL_SPAWN" "$BASH_TOOL_TS"; then
+        perl -i -0777 -pe '
+            s/(  return spawn\(command, \{\n    shell,\n    cwd,\n    env,\n    stdio: \["ignore", "pipe", "pipe"\],\n    detached: false,\n    \/\/ OPENCODE_ANDROID_BASH_DETACHED_FIX\n    \/\/ OPENCODE_ANDROID_BASH_ANDROID_ONLY_FIX\n    windowsHide: process\.platform === "win32",\n  \}\))/  if (process.env.TERMUX_VERSION || process.env.ANDROID_ROOT || process.env.PREFIX?.includes("com.termux")) {\n    return spawn(shell, ["-c", command], {\n      cwd,\n      env,\n      stdio: ["ignore", "pipe", "pipe"],\n      detached: false,\n      windowsHide: false,\n    })\n  }\n  \/\/ OPENCODE_ANDROID_BASH_EXPLICIT_SHELL_SPAWN\n\n$1/s
+        ' "$BASH_TOOL_TS"
+        echo "    Patched $BASH_TOOL_TS (use explicit shell spawn on Android)"
+    fi
 fi
 
 # 5. Avoid Bun's negative-pid process.kill path on Android/Termux.
