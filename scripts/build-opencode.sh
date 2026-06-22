@@ -196,7 +196,7 @@ WATCHER_TS="$OPENCODE_PKG/src/file/watcher.ts"
 if [ -f "$WATCHER_TS" ]; then
     if ! grep -q "TERMUX_VERSION" "$WATCHER_TS"; then
         perl -i -pe '
-            s/^(\s*const watcher = lazy\(\(\): typeof import\("(.*)"\) \| undefined => \{)/$1\n    if (process.env.TERMUX_VERSION \|\| process.env.ANDROID_ROOT) {\n      log.info("file watcher disabled on Android\/Termux")\n      return\n    }/
+            s/^(\s*const watcher = lazy\(\(\): typeof import\("(.*)"\) \| undefined => \{)/$1\n    if (process.env.TERMUX_VERSION \|\| process.env.ANDROID_ROOT \|\| process.env.PREFIX?.includes("com.termux")) {\n      log.info("file watcher disabled on Android\/Termux")\n      return\n    }/
         ' "$WATCHER_TS"
         echo "    Patched $WATCHER_TS (disable file watcher on Android)"
     else
@@ -212,7 +212,7 @@ CONFIG_TS="$OPENCODE_PKG/src/config/config.ts"
 if [ -f "$CONFIG_TS" ]; then
     if ! grep -q "TERMUX_VERSION" "$CONFIG_TS"; then
         perl -i -pe '
-            s/^(\s*export async function installDependencies\(dir: string, input\?: InstallInput\) \{)/$1\n    if (process.env.TERMUX_VERSION \|\| process.env.ANDROID_ROOT) {\n      log.info("skipping dependency install on Android\/Termux", { dir })\n      return\n    }/
+            s/^(\s*export async function installDependencies\(dir: string, input\?: InstallInput\) \{)/$1\n    if (process.env.TERMUX_VERSION \|\| process.env.ANDROID_ROOT \|\| process.env.PREFIX?.includes("com.termux")) {\n      log.info("skipping dependency install on Android\/Termux", { dir })\n      return\n    }/
         ' "$CONFIG_TS"
         echo "    Patched $CONFIG_TS (skip dependency install on Android)"
     else
@@ -242,11 +242,20 @@ BASH_TOOL_TS="$OPENCODE_PKG/src/tool/bash.ts"
 if [ -f "$BASH_TOOL_TS" ]; then
     if ! grep -q "OPENCODE_ANDROID_BASH_DETACHED_FIX" "$BASH_TOOL_TS"; then
         perl -i -0777 -pe '
-            s/detached: process\.platform !== "win32",/detached: process.env.TERMUX_VERSION || process.env.ANDROID_ROOT ? false : process.platform !== "win32",\n    \/\/ OPENCODE_ANDROID_BASH_DETACHED_FIX/
+            s/detached: process\.platform !== "win32",/detached: process.env.TERMUX_VERSION || process.env.ANDROID_ROOT || process.env.PREFIX?.includes("com.termux") ? false : process.platform !== "win32",\n    \/\/ OPENCODE_ANDROID_BASH_DETACHED_FIX/
         ' "$BASH_TOOL_TS"
         echo "    Patched $BASH_TOOL_TS (disable detached bash tool on Android)"
     else
         echo "    $BASH_TOOL_TS already patched"
+    fi
+
+    if ! grep -q "OPENCODE_ANDROID_BASH_PERMISSION_FIX" "$BASH_TOOL_TS"; then
+        perl -i -0777 -pe '
+            s/      await ask\(ctx, scan\)/      if (!(process.env.TERMUX_VERSION || process.env.ANDROID_ROOT || process.env.PREFIX?.includes("com.termux"))) {\n        await ask(ctx, scan)\n      }\n      \/\/ OPENCODE_ANDROID_BASH_PERMISSION_FIX/
+        ' "$BASH_TOOL_TS"
+        echo "    Patched $BASH_TOOL_TS (skip bash permission prompt on Android)"
+    else
+        echo "    $BASH_TOOL_TS already has Android bash permission fix"
     fi
 fi
 
