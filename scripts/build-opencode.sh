@@ -211,6 +211,12 @@ if [ -f "$WATCHER_TS" ]; then
         echo "ERROR: $WATCHER_TS Android/Termux guard missing PREFIX detection" >&2
         exit 1
     fi
+    if ! grep -q "OPENCODE_ANDROID_DISABLE_WATCHER" "$WATCHER_TS"; then
+        perl -i -0777 -pe '
+            s/(const watcher = lazy\(\(\): typeof import\("\@parcel\/watcher"\) \| undefined => \{\n)/$1    log.info("file watcher disabled on Android\/Termux")\n    return\n    \/\/ OPENCODE_ANDROID_DISABLE_WATCHER\n/
+        ' "$WATCHER_TS"
+        echo "    Patched $WATCHER_TS (force-disable watcher for Android package)"
+    fi
 fi
 
 # 2. Skip config-dir dependency installs on Android/Termux.
@@ -235,6 +241,12 @@ if [ -f "$CONFIG_TS" ]; then
     if ! grep -q 'PREFIX.*com.termux' "$CONFIG_TS"; then
         echo "ERROR: $CONFIG_TS Android/Termux guard missing PREFIX detection" >&2
         exit 1
+    fi
+    if ! grep -q "OPENCODE_ANDROID_DISABLE_CONFIG_INSTALL" "$CONFIG_TS"; then
+        perl -i -0777 -pe '
+            s/(export async function installDependencies\(dir: string, input\?: InstallInput\) \{\n)/$1    log.info("skipping dependency install on Android\/Termux", { dir })\n    return\n    \/\/ OPENCODE_ANDROID_DISABLE_CONFIG_INSTALL\n/
+        ' "$CONFIG_TS"
+        echo "    Patched $CONFIG_TS (force-disable config dependency install for Android package)"
     fi
 fi
 
@@ -283,6 +295,16 @@ if [ -f "$BASH_TOOL_TS" ]; then
     if ! grep -q 'PREFIX.*com.termux' "$BASH_TOOL_TS"; then
         echo "ERROR: $BASH_TOOL_TS Android/Termux guard missing PREFIX detection" >&2
         exit 1
+    fi
+    if ! grep -q "OPENCODE_ANDROID_BASH_ANDROID_ONLY_FIX" "$BASH_TOOL_TS"; then
+        perl -i -0777 -pe '
+            s/detached: process\.env\.TERMUX_VERSION \|\| process\.env\.ANDROID_ROOT \|\| process\.env\.PREFIX\?\.includes\("com\.termux"\) \? false : process\.platform !== "win32",/detached: false,/g;
+            s/detached: process\.platform !== "win32",/detached: false,/g;
+            s/\n\s*if \(!\(process\.env\.TERMUX_VERSION \|\| process\.env\.ANDROID_ROOT \|\| process\.env\.PREFIX\?\.includes\("com\.termux"\)\)\) \{\n\s*await ask\(ctx, scan\)\n\s*\}\n\s*\/\/ OPENCODE_ANDROID_BASH_PERMISSION_FIX/\n      \/\/ OPENCODE_ANDROID_BASH_PERMISSION_DISABLED/g;
+            s/      await ask\(ctx, scan\)/      \/\/ OPENCODE_ANDROID_BASH_PERMISSION_DISABLED/g;
+            s/(\/\/ OPENCODE_ANDROID_BASH_DETACHED_FIX)/$1\n    \/\/ OPENCODE_ANDROID_BASH_ANDROID_ONLY_FIX/
+        ' "$BASH_TOOL_TS"
+        echo "    Patched $BASH_TOOL_TS (force Android bash subprocess behavior)"
     fi
 fi
 

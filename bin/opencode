@@ -14,6 +14,12 @@ set -e
 
 dir="$(cd "$(dirname "$0")" && pwd)"
 
+# The compiled OpenCode binary cannot reliably infer Termux when launched via
+# this wrapper, so export the standard Termux markers used by our Android
+# runtime patches.
+export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+export TERMUX_VERSION="${TERMUX_VERSION:-opencode-termux}"
+
 # Locate the native libraries we ship alongside the wrapper.
 # In the flat zip layout they sit next to the wrapper; in the Termux package
 # layout they are under ../lib.
