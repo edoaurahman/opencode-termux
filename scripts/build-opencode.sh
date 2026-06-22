@@ -233,7 +233,24 @@ if [ -f "$BUNPROC_TS" ]; then
     fi
 fi
 
-# 4. Add diagnostic logging around createCliRenderer/render in the TUI app.
+# 4. Avoid Bun's detached child_process path on Android/Termux.
+#    Tool calling still works: commands are spawned with stdout/stderr pipes,
+#    but without creating a detached Unix process group. This targets the
+#    Android-only "integer does not fit in destination type" panic seen when
+#    the Bash tool runs commands such as `ls`.
+BASH_TOOL_TS="$OPENCODE_PKG/src/tool/bash.ts"
+if [ -f "$BASH_TOOL_TS" ]; then
+    if ! grep -q "OPENCODE_ANDROID_BASH_DETACHED_FIX" "$BASH_TOOL_TS"; then
+        perl -i -0777 -pe '
+            s/detached: process\.platform !== "win32",/detached: process.env.TERMUX_VERSION || process.env.ANDROID_ROOT ? false : process.platform !== "win32",\n    \/\/ OPENCODE_ANDROID_BASH_DETACHED_FIX/
+        ' "$BASH_TOOL_TS"
+        echo "    Patched $BASH_TOOL_TS (disable detached bash tool on Android)"
+    else
+        echo "    $BASH_TOOL_TS already patched"
+    fi
+fi
+
+# 5. Add diagnostic logging around createCliRenderer/render in the TUI app.
 #    The TUI hangs on Android with no output; we need to know whether
 #    createCliRenderer succeeds, throws, or never returns.
 APP_TSX="$OPENCODE_PKG/src/cli/cmd/tui/app.tsx"
