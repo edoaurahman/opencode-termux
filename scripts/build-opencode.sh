@@ -199,8 +199,17 @@ if [ -f "$WATCHER_TS" ]; then
             s/^(\s*const watcher = lazy\(\(\): typeof import\("(.*)"\) \| undefined => \{)/$1\n    if (process.env.TERMUX_VERSION \|\| process.env.ANDROID_ROOT \|\| process.env.PREFIX?.includes("com.termux")) {\n      log.info("file watcher disabled on Android\/Termux")\n      return\n    }/
         ' "$WATCHER_TS"
         echo "    Patched $WATCHER_TS (disable file watcher on Android)"
+    elif ! grep -q 'PREFIX.*com.termux' "$WATCHER_TS"; then
+        perl -i -pe '
+            s/process\.env\.TERMUX_VERSION \|\| process\.env\.ANDROID_ROOT/process.env.TERMUX_VERSION || process.env.ANDROID_ROOT || process.env.PREFIX?.includes("com.termux")/g
+        ' "$WATCHER_TS"
+        echo "    Updated $WATCHER_TS (broaden Android/Termux guard)"
     else
         echo "    $WATCHER_TS already patched"
+    fi
+    if ! grep -q 'PREFIX.*com.termux' "$WATCHER_TS"; then
+        echo "ERROR: $WATCHER_TS Android/Termux guard missing PREFIX detection" >&2
+        exit 1
     fi
 fi
 
@@ -215,8 +224,17 @@ if [ -f "$CONFIG_TS" ]; then
             s/^(\s*export async function installDependencies\(dir: string, input\?: InstallInput\) \{)/$1\n    if (process.env.TERMUX_VERSION \|\| process.env.ANDROID_ROOT \|\| process.env.PREFIX?.includes("com.termux")) {\n      log.info("skipping dependency install on Android\/Termux", { dir })\n      return\n    }/
         ' "$CONFIG_TS"
         echo "    Patched $CONFIG_TS (skip dependency install on Android)"
+    elif ! grep -q 'PREFIX.*com.termux' "$CONFIG_TS"; then
+        perl -i -pe '
+            s/process\.env\.TERMUX_VERSION \|\| process\.env\.ANDROID_ROOT/process.env.TERMUX_VERSION || process.env.ANDROID_ROOT || process.env.PREFIX?.includes("com.termux")/g
+        ' "$CONFIG_TS"
+        echo "    Updated $CONFIG_TS (broaden Android/Termux guard)"
     else
         echo "    $CONFIG_TS already patched"
+    fi
+    if ! grep -q 'PREFIX.*com.termux' "$CONFIG_TS"; then
+        echo "ERROR: $CONFIG_TS Android/Termux guard missing PREFIX detection" >&2
+        exit 1
     fi
 fi
 
@@ -245,6 +263,11 @@ if [ -f "$BASH_TOOL_TS" ]; then
             s/detached: process\.platform !== "win32",/detached: process.env.TERMUX_VERSION || process.env.ANDROID_ROOT || process.env.PREFIX?.includes("com.termux") ? false : process.platform !== "win32",\n    \/\/ OPENCODE_ANDROID_BASH_DETACHED_FIX/
         ' "$BASH_TOOL_TS"
         echo "    Patched $BASH_TOOL_TS (disable detached bash tool on Android)"
+    elif ! grep -q 'PREFIX.*com.termux' "$BASH_TOOL_TS"; then
+        perl -i -pe '
+            s/process\.env\.TERMUX_VERSION \|\| process\.env\.ANDROID_ROOT/process.env.TERMUX_VERSION || process.env.ANDROID_ROOT || process.env.PREFIX?.includes("com.termux")/g
+        ' "$BASH_TOOL_TS"
+        echo "    Updated $BASH_TOOL_TS (broaden Android/Termux guard)"
     else
         echo "    $BASH_TOOL_TS already patched"
     fi
@@ -256,6 +279,10 @@ if [ -f "$BASH_TOOL_TS" ]; then
         echo "    Patched $BASH_TOOL_TS (skip bash permission prompt on Android)"
     else
         echo "    $BASH_TOOL_TS already has Android bash permission fix"
+    fi
+    if ! grep -q 'PREFIX.*com.termux' "$BASH_TOOL_TS"; then
+        echo "ERROR: $BASH_TOOL_TS Android/Termux guard missing PREFIX detection" >&2
+        exit 1
     fi
 fi
 
