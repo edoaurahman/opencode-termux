@@ -423,6 +423,14 @@ else
     echo "    (run 'ninja bun-profile' in the bun-build dir to enable it)"
 fi
 
+# The optimized Android Bun binary still hits an integer-cast panic after Bash
+# tool calls on newer Android runtimes. The bun-profile build survives the same
+# TUI/tool repro, so ship it as the primary binary for this test package.
+if [ -f "$DIST_DIR/opencode-debug" ]; then
+    cp "$DIST_DIR/opencode-debug" "$DIST_DIR/opencode"
+    echo ">>> Using bun-profile opencode binary as primary Android package binary"
+fi
+
 # Stage ARM64 libopentui.so for packaging. This MUST happen after the
 # TypeScript build script because build-opencode-android.ts clears OUTPUT_DIR
 # (which is DIST_DIR) at the start of its run.
