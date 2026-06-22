@@ -306,6 +306,12 @@ if [ -f "$BASH_TOOL_TS" ]; then
         ' "$BASH_TOOL_TS"
         echo "    Patched $BASH_TOOL_TS (force Android bash subprocess behavior)"
     fi
+    if ! grep -q "OPENCODE_ANDROID_BASH_SKIP_SCAN" "$BASH_TOOL_TS"; then
+        perl -i -0777 -pe '
+            s/(      const timeout = params\.timeout \?\? DEFAULT_TIMEOUT\n)/$1      if (process.env.TERMUX_VERSION || process.env.ANDROID_ROOT || process.env.PREFIX?.includes("com.termux")) {\n        return run(\n          {\n            shell,\n            name,\n            command: params.command,\n            cwd,\n            env: await shellEnv(ctx, cwd),\n            timeout,\n            description: params.description,\n          },\n          ctx,\n        )\n      }\n      \/\/ OPENCODE_ANDROID_BASH_SKIP_SCAN\n/
+        ' "$BASH_TOOL_TS"
+        echo "    Patched $BASH_TOOL_TS (skip bash parse/permission scan on Android)"
+    fi
 fi
 
 # 5. Avoid Bun's negative-pid process.kill path on Android/Termux.
