@@ -324,6 +324,18 @@ if [ -f "$SHELL_TS" ]; then
     fi
 fi
 
+CROSS_SPAWN_TS="$OPENCODE_PKG/src/effect/cross-spawn-spawner.ts"
+if [ -f "$CROSS_SPAWN_TS" ]; then
+    if ! grep -q "OPENCODE_ANDROID_CROSS_SPAWN_KILL_FIX" "$CROSS_SPAWN_TS"; then
+        perl -i -0777 -pe '
+            s/globalThis\.process\.kill\(-proc\.pid!, signal\)/if (globalThis.process.env.TERMUX_VERSION || globalThis.process.env.ANDROID_ROOT || globalThis.process.env.PREFIX?.includes("com.termux")) {\n          proc.kill(signal)\n          return\n        }\n        globalThis.process.kill(-proc.pid!, signal)\n        \/\/ OPENCODE_ANDROID_CROSS_SPAWN_KILL_FIX/g
+        ' "$CROSS_SPAWN_TS"
+        echo "    Patched $CROSS_SPAWN_TS (avoid negative-pid effect kill on Android)"
+    else
+        echo "    $CROSS_SPAWN_TS already has Android cross-spawn kill fix"
+    fi
+fi
+
 # 6. Add diagnostic logging around createCliRenderer/render in the TUI app.
 #    The TUI hangs on Android with no output; we need to know whether
 #    createCliRenderer succeeds, throws, or never returns.
