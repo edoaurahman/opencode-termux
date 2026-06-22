@@ -308,7 +308,23 @@ if [ -f "$BASH_TOOL_TS" ]; then
     fi
 fi
 
-# 5. Add diagnostic logging around createCliRenderer/render in the TUI app.
+# 5. Avoid Bun's negative-pid process.kill path on Android/Termux.
+#    Android does not need process-group cleanup because the Bash tool is
+#    forced to spawn non-detached children. Bun's Android kill(-pid) path can
+#    panic with "integer does not fit in destination type".
+SHELL_TS="$OPENCODE_PKG/src/shell/shell.ts"
+if [ -f "$SHELL_TS" ]; then
+    if ! grep -q "OPENCODE_ANDROID_KILLTREE_FIX" "$SHELL_TS"; then
+        perl -i -0777 -pe '
+            s/(\n    if \(process\.platform === "win32"\) \{\n      await new Promise<void>\(\(resolve\) => \{\n        const killer = spawn\("taskkill", \["\/pid", String\(pid\), "\/f", "\/t"\], \{\n          stdio: "ignore",\n          windowsHide: true,\n        \}\)\n        killer\.once\("exit", \(\) => resolve\(\)\)\n        killer\.once\("error", \(\) => resolve\(\)\)\n      \}\)\n      return\n    \}\n)/$1\n    if (process.env.TERMUX_VERSION || process.env.ANDROID_ROOT || process.env.PREFIX?.includes("com.termux")) {\n      proc.kill("SIGTERM")\n      await sleep(SIGKILL_TIMEOUT_MS)\n      if (!opts?.exited?.()) proc.kill("SIGKILL")\n      return\n    }\n    \/\/ OPENCODE_ANDROID_KILLTREE_FIX\n/s
+        ' "$SHELL_TS"
+        echo "    Patched $SHELL_TS (avoid negative-pid kill on Android)"
+    else
+        echo "    $SHELL_TS already has Android killTree fix"
+    fi
+fi
+
+# 6. Add diagnostic logging around createCliRenderer/render in the TUI app.
 #    The TUI hangs on Android with no output; we need to know whether
 #    createCliRenderer succeeds, throws, or never returns.
 APP_TSX="$OPENCODE_PKG/src/cli/cmd/tui/app.tsx"
@@ -421,14 +437,6 @@ IDXEOF
 else
     echo ">>> bun-profile not found, skipping debug variant"
     echo "    (run 'ninja bun-profile' in the bun-build dir to enable it)"
-fi
-
-# The optimized Android Bun binary still hits an integer-cast panic after Bash
-# tool calls on newer Android runtimes. The bun-profile build survives the same
-# TUI/tool repro, so ship it as the primary binary for this test package.
-if [ -f "$DIST_DIR/opencode-debug" ]; then
-    cp "$DIST_DIR/opencode-debug" "$DIST_DIR/opencode"
-    echo ">>> Using bun-profile opencode binary as primary Android package binary"
 fi
 
 # Stage ARM64 libopentui.so for packaging. This MUST happen after the
