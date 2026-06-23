@@ -318,6 +318,13 @@ if [ -f "$BASH_TOOL_TS" ]; then
         ' "$BASH_TOOL_TS"
         echo "    Patched $BASH_TOOL_TS (use explicit shell spawn on Android)"
     fi
+    if ! grep -q "OPENCODE_ANDROID_BASH_SYNC_SPAWN" "$BASH_TOOL_TS"; then
+        perl -i -0777 -pe '
+            s/import \{ spawn \} from "child_process"/import { spawn, spawnSync } from "child_process"/;
+            s/(      const timeout = params\.timeout \?\? DEFAULT_TIMEOUT\n)/$1      if (process.env.TERMUX_VERSION || process.env.ANDROID_ROOT || process.env.PREFIX?.includes("com.termux")) {\n        const env = await shellEnv(ctx, cwd)\n        ctx.metadata({ metadata: { output: "", description: params.description } })\n        const result = spawnSync(shell, ["-c", params.command], {\n          cwd,\n          env,\n          encoding: "utf8",\n          timeout,\n          maxBuffer: Math.max(Truncate.MAX_BYTES, 1024 * 1024),\n        })\n        let output = String(result.stdout || "") + String(result.stderr || "")\n        if (result.error) output += "\\n\\n<bash_metadata>\\n" + result.error.message + "\\n<\/bash_metadata>"\n        ctx.metadata({ metadata: { output: preview(output), description: params.description } })\n        return {\n          title: params.description,\n          metadata: {\n            output: preview(output),\n            exit: typeof result.status === "number" ? result.status : result.signal ? 1 : 0,\n            description: params.description,\n          },\n          output,\n        }\n      }\n      \/\/ OPENCODE_ANDROID_BASH_SYNC_SPAWN\n/
+        ' "$BASH_TOOL_TS"
+        echo "    Patched $BASH_TOOL_TS (use synchronous bash execution on Android)"
+    fi
 fi
 
 # 5. Avoid Bun's negative-pid process.kill path on Android/Termux.
