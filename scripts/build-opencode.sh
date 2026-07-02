@@ -30,6 +30,13 @@ if [ ! -d "$OPENCODE_SRC/.git" ]; then
     git clone --depth 1 --branch "v${OPENCODE_VERSION}" https://github.com/anomalyco/opencode.git "$OPENCODE_SRC"
 else
     echo ">>> OpenCode source exists at $OPENCODE_SRC"
+    cd "$OPENCODE_SRC"
+    CURRENT=$(git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    if [ "$CURRENT" != "v${OPENCODE_VERSION}" ]; then
+        echo "    Checking out v${OPENCODE_VERSION} (was $CURRENT)..."
+        git fetch --tags origin "v${OPENCODE_VERSION}" 2>/dev/null || true
+        git checkout --force "v${OPENCODE_VERSION}"
+    fi
 fi
 
 OPENCODE_PKG="$OPENCODE_SRC/packages/opencode"
@@ -37,7 +44,7 @@ OPENCODE_PKG="$OPENCODE_SRC/packages/opencode"
 # Install OpenCode dependencies
 echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC"
-"$HOST_BUN" install
+"$HOST_BUN" install --ignore-scripts
 
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD/bun"
@@ -48,7 +55,7 @@ if [ ! -f "$ANDROID_BUN" ]; then
 fi
 
 # Use the ARM64 libopentui.so built by scripts/build-opentui.sh.
-# build-opentui.sh checks out opentui v0.1.95 (the version OpenCode depends on)
+# build-opentui.sh checks out opentui v0.4.2 (the version OpenCode depends on)
 # and cross-compiles it for aarch64-linux-android, producing:
 #   $OPENTUI_SRC/packages/core/src/lib/aarch64-linux-android/libopentui.so
 echo ">>> Locating ARM64 libopentui.so from opentui build..."
@@ -140,7 +147,7 @@ for pkg_dir in "${OPENTUI_PACKAGES[@]}"; do
         idx_backup="${idx_file}.bak"
         cp "$idx_file" "$idx_backup"
         cat > "$idx_file" <<'IDXEOF'
-module.exports = process.env.OPENTUI_LIB_PATH || "/data/data/com.termux/files/usr/lib/libopentui.so";
+module.exports = process.env["OPENTUI_LIB_PATH"] || "/data/data/com.termux/files/usr/lib/libopentui.so";
 IDXEOF
         OPENTUI_BACKUPS+=("$idx_file:$idx_backup")
         echo "    Patched $idx_file"
@@ -165,7 +172,7 @@ if [ ! -d "$CORE_LINUX_ARM64_DIR" ]; then
 EOF
     cp "$ARM64_LIBOPENTUI" "$CORE_LINUX_ARM64_DIR/libopentui.so"
     cat > "$CORE_LINUX_ARM64_DIR/index.js" <<'EOF'
-module.exports = process.env.OPENTUI_LIB_PATH || "/data/data/com.termux/files/usr/lib/libopentui.so";
+module.exports = process.env["OPENTUI_LIB_PATH"] || "/data/data/com.termux/files/usr/lib/libopentui.so";
 EOF
     echo "    Created $CORE_LINUX_ARM64_DIR"
 else
@@ -180,23 +187,104 @@ else
 EOF
     cp "$ARM64_LIBOPENTUI" "$CORE_LINUX_ARM64_DIR/libopentui.so"
     cat > "$CORE_LINUX_ARM64_DIR/index.js" <<'EOF'
-module.exports = process.env.OPENTUI_LIB_PATH || "/data/data/com.termux/files/usr/lib/libopentui.so";
+module.exports = process.env["OPENTUI_LIB_PATH"] || "/data/data/com.termux/files/usr/lib/libopentui.so";
 EOF
 fi
+
+# Patch @opentui/core's generated FFI wrapper. Bun validates numeric arguments
+# against the declared FFI type before Zig sees them; Android terminal/layout
+# churn can briefly produce negative viewport sizes, which otherwise throws
+# "integer does not fit in destination type" for u32 arguments.
+echo ">>> Patching @opentui/core FFI u32 boundary..."
+while IFS= read -r -d '' opentui_js; do
+    if grep -q "function toU32(value)" "$opentui_js" && grep -q "OPENTUI_LIB_PATH" "$opentui_js" && grep -q "if (true) return null;" "$opentui_js"; then
+        echo "    $opentui_js already patched"
+        continue
+    fi
+    if ! grep -q "textBufferViewSetViewport(view, x, y, width, height)" "$opentui_js"; then
+        continue
+    fi
+    python3 - "$opentui_js" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text()
+text = text.replace(
+    'if (isBunfsPath(targetLibPath)) {\n  targetLibPath = targetLibPath.replace("../", "");\n}\nif (!existsSync2(targetLibPath)) {',
+    'if (isBunfsPath(targetLibPath)) {\n  targetLibPath = targetLibPath.replace("../", "");\n}\nif (process.env["OPENTUI_LIB_PATH"]) {\n  targetLibPath = process.env["OPENTUI_LIB_PATH"];\n}\nif (!existsSync2(targetLibPath)) {',
+)
+text = text.replace(
+    'function toNumber(value) {\n  return typeof value === "bigint" ? Number(value) : value;\n}\n',
+    'function toNumber(value) {\n  return typeof value === "bigint" ? Number(value) : value;\n}\nfunction toU32(value) {\n  if (!Number.isFinite(value) || value <= 0) return 0;\n  return Math.min(Math.trunc(value), 4294967295);\n}\n',
+)
+text = text.replace(
+    'this.opentui.symbols.textBufferViewSetWrapWidth(view, width);',
+    'this.opentui.symbols.textBufferViewSetWrapWidth(view, toU32(width));',
+)
+text = text.replace(
+    'this.opentui.symbols.textBufferViewSetFirstLineOffset(view, offset);',
+    'this.opentui.symbols.textBufferViewSetFirstLineOffset(view, toU32(offset));',
+)
+text = text.replace(
+    'this.opentui.symbols.textBufferViewSetViewportSize(view, width, height);',
+    'this.opentui.symbols.textBufferViewSetViewportSize(view, toU32(width), toU32(height));',
+)
+text = text.replace(
+    'this.opentui.symbols.textBufferViewSetViewport(view, x, y, width, height);',
+    'this.opentui.symbols.textBufferViewSetViewport(view, toU32(x), toU32(y), toU32(width), toU32(height));',
+)
+text = text.replace(
+    'this.opentui.symbols.textBufferViewMeasureForDimensions(view, width, height, resultPtr);',
+    'this.opentui.symbols.textBufferViewMeasureForDimensions(view, toU32(width), toU32(height), resultPtr);',
+)
+text = text.replace(
+    '  static create(options = {}) {\n    return new Audio(resolveRenderLib(), options);\n  }\n',
+    '  static create(options = {}) {\n    if (true) return null;\n    return new Audio(resolveRenderLib(), options);\n  }\n',
+)
+text = text.replace(
+    '    const useFeedOutput = !this._usesProcessStdout && !useMemoryBufferedOutput;',
+    '    const useFeedOutput = false;',
+)
+path.write_text(text)
+PY
+    echo "    Patched $opentui_js"
+done < <(find "$OPENCODE_SRC" -path '*/node_modules/@opentui/core/index-*.js' -type f -print0 2>/dev/null || true)
 
 # Patch OpenCode source for Android/Termux runtime constraints.
 # We cannot modify the upstream source directly, so apply local patches here.
 echo ">>> Patching OpenCode source for Android/Termux..."
 
-# 1. Disable the file watcher on Android/Termux.
+# 1. Keep cache/tmp paths inside the Termux home directory.
+#    Bun resolves os.tmpdir() to /data/local/tmp on Android, which the Termux
+#    app sandbox cannot mkdir/read under normal app context.
+GLOBAL_TS="$OPENCODE_SRC/packages/core/src/global.ts"
+if [ -f "$GLOBAL_TS" ]; then
+    if ! grep -q 'home.startsWith("/data/data/com.termux/")' "$GLOBAL_TS"; then
+        perl -i -pe '
+            s/^const app = "opencode"$/const app = "opencode"\nconst home = process.env.OPENCODE_TEST_HOME ?? os.homedir()\nconst isAndroid = Boolean(\n  process.env.TERMUX_VERSION || process.env.ANDROID_ROOT || home.startsWith("\/data\/data\/com.termux\/"),\n)/;
+            s/^const cache = path\.join\(xdgCache!, app\)$/const cache = isAndroid ? path.join(home, ".cache", app) : path.join(xdgCache!, app)/;
+            s/^const tmp = path\.join\(os\.tmpdir\(\), app\)$/const tmp = isAndroid ? path.join(cache, "tmp") : path.join(os.tmpdir(), app)/;
+            s/return process\.env\.OPENCODE_TEST_HOME \?\? os\.homedir\(\)/return home/;
+        ' "$GLOBAL_TS"
+        echo "    Patched $GLOBAL_TS (Termux cache/tmp paths)"
+    else
+        echo "    $GLOBAL_TS already patched"
+    fi
+fi
+
+# 2. Disable the file watcher on Android/Termux.
 #    @parcel/watcher bundles the host (x86_64) native binding on a Linux build
 #    machine, which dlopen's on ARM64 Android and crashes. Until the ARM64
 #    binding is bundled, simply disable file watching.
-WATCHER_TS="$OPENCODE_PKG/src/file/watcher.ts"
+WATCHER_TS="$OPENCODE_SRC/packages/core/src/filesystem/watcher.ts"
+if [ ! -f "$WATCHER_TS" ]; then
+    WATCHER_TS="$OPENCODE_PKG/src/file/watcher.ts"
+fi
 if [ -f "$WATCHER_TS" ]; then
     if ! grep -q "TERMUX_VERSION" "$WATCHER_TS"; then
         perl -i -pe '
-            s/^(\s*const watcher = lazy\(\(\): typeof import\("(.*)"\) \| undefined => \{)/$1\n    if (process.env.TERMUX_VERSION \|\| process.env.ANDROID_ROOT) {\n      log.info("file watcher disabled on Android\/Termux")\n      return\n    }/
+            s/^(\s*const watcher = lazy\(\(\): typeof import\("(.*)"\) \| undefined => \{)/$1\n  if (process.env.TERMUX_VERSION \|\| process.env.ANDROID_ROOT) return/
         ' "$WATCHER_TS"
         echo "    Patched $WATCHER_TS (disable file watcher on Android)"
     else
@@ -204,15 +292,16 @@ if [ -f "$WATCHER_TS" ]; then
     fi
 fi
 
-# 2. Skip config-dir dependency installs on Android/Termux.
+# 3. Skip config-dir dependency installs on Android/Termux.
 #    In a bun build --compile binary, process.execPath is the compiled opencode
 #    binary, so `bun install` becomes `opencode.bin install`, which fails.
 #    User plugins are not supported in the Termux build anyway.
 CONFIG_TS="$OPENCODE_PKG/src/config/config.ts"
 if [ -f "$CONFIG_TS" ]; then
     if ! grep -q "TERMUX_VERSION" "$CONFIG_TS"; then
-        perl -i -pe '
-            s/^(\s*export async function installDependencies\(dir: string, input\?: InstallInput\) \{)/$1\n    if (process.env.TERMUX_VERSION \|\| process.env.ANDROID_ROOT) {\n      log.info("skipping dependency install on Android\/Termux", { dir })\n      return\n    }/
+        perl -i -0777 -pe '
+            s/(\n\s*)const dep = yield\* npmSvc\n\s+\.install\(dir,/$1if (process.env.TERMUX_VERSION || process.env.ANDROID_ROOT) {\n$1  yield* Effect.logInfo("skipping dependency install on Android Termux", { dir })\n$1} else {\n$1  const dep = yield* npmSvc\n$1    .install(dir,/;
+            s/(\n\s*)deps\.push\(dep\)/$1deps.push(dep)\n$1}/;
         ' "$CONFIG_TS"
         echo "    Patched $CONFIG_TS (skip dependency install on Android)"
     else
@@ -220,7 +309,7 @@ if [ -f "$CONFIG_TS" ]; then
     fi
 fi
 
-# 3. Allow BunProc.which() to use a real bun binary if one is shipped.
+# 4. Allow BunProc.which() to use a real bun binary if one is shipped.
 BUNPROC_TS="$OPENCODE_PKG/src/bun/index.ts"
 if [ -f "$BUNPROC_TS" ]; then
     if ! grep -q "OPENCODE_BUN_PATH" "$BUNPROC_TS"; then
@@ -233,7 +322,25 @@ if [ -f "$BUNPROC_TS" ]; then
     fi
 fi
 
-# 4. Add diagnostic logging around createCliRenderer/render in the TUI app.
+# 5. Disable TUI audio on the Android/Termux build.
+#    OpenTUI audio group handling panics on Android after a few prompt responses.
+AUDIO_TS="$OPENCODE_SRC/packages/tui/src/audio.ts"
+if [ -f "$AUDIO_TS" ]; then
+    if ! grep -q 'const disableAudio = true' "$AUDIO_TS"; then
+        perl -i -0777 -pe '
+            s/const disableAudio = process\.platform === "linux" \&\& process\.arch === "arm64"\n//;
+            s/const disableAudio = process\.execPath\.includes\("\/data\/data\/com\.termux\/"\)\n//;
+            s/const disableAudio = process\.env\["OPENCODE_DISABLE_TUI_AUDIO"\] === "1"\n//;
+            s/(const sounds = new Map<string, Promise<AudioSound \| null>>\(\)\n)/$1const disableAudio = true\n/;
+            s/function getAudio\(\) \{\n/function getAudio() {\n  if (disableAudio) {\n    audio = null\n    return null\n  }\n/;
+        ' "$AUDIO_TS"
+        echo "    Patched $AUDIO_TS (disable TUI audio on Android)"
+    else
+        echo "    $AUDIO_TS already patched"
+    fi
+fi
+
+# 6. Add diagnostic logging around createCliRenderer/render in the TUI app.
 #    The TUI hangs on Android with no output; we need to know whether
 #    createCliRenderer succeeds, throws, or never returns.
 APP_TSX="$OPENCODE_PKG/src/cli/cmd/tui/app.tsx"
@@ -249,6 +356,24 @@ if [ -f "$APP_TSX" ]; then
         echo "    $APP_TSX already patched"
     fi
 fi
+
+# 5. Work around missing type-only AWS ESM exports that Bun 1.3.2 still tries
+#    to resolve while bundling. Newer Bun versions are better here, but 1.3.2
+#    remains pinned because its standalone module graph is compatible with the
+#    Android Bun 1.2.13 runtime.
+AWS_COGNITO_INDEX="$OPENCODE_SRC/node_modules/.bun/@aws-sdk+credential-provider-cognito-identity@"*/node_modules/@aws-sdk/credential-provider-cognito-identity/dist-es/index.js
+for aws_index in $AWS_COGNITO_INDEX; do
+    if [ -f "$aws_index" ]; then
+        cat > "$aws_index" <<'AWSEOF'
+const unsupported = () => {
+  throw new Error("@aws-sdk/credential-provider-cognito-identity is not bundled in the Android build")
+}
+export const fromCognitoIdentity = unsupported
+export const fromCognitoIdentityPool = unsupported
+AWSEOF
+        echo "    Patched $aws_index (stub optional Cognito provider)"
+    fi
+done
 
 # Run the TypeScript build script
 # Copy it into the OpenCode tree so Bun can resolve @opentui/solid/bun-plugin
@@ -312,7 +437,7 @@ if [ -f "$ANDROID_DEBUG_BUN" ]; then
             debug_idx_backup="${idx_file}.debug-bak"
             cp "$idx_file" "$debug_idx_backup"
             cat > "$idx_file" <<'IDXEOF'
-module.exports = process.env.OPENTUI_LIB_PATH || "/data/data/com.termux/files/usr/lib/libopentui.so";
+module.exports = process.env["OPENTUI_LIB_PATH"] || "/data/data/com.termux/files/usr/lib/libopentui.so";
 IDXEOF
             DEBUG_OPENTUI_BACKUPS+=("$idx_file:$debug_idx_backup")
         fi

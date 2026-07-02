@@ -15,9 +15,9 @@ source "$SCRIPT_DIR/env.sh"
 ZIG_BIN="${ZIG_BIN:-zig}"
 
 # Pin opentui to the exact version that OpenCode depends on.
-# This commit corresponds to @opentui/core v0.1.95. We still patch its Zig
+# This commit corresponds to @opentui/core v0.4.2. We still patch its Zig
 # build so the produced .so has a NEEDED: libc.so entry for Android dlopen().
-OPENTUI_COMMIT="ebe288e0e2c85d3c7cbb44b1e3600beb68e100a2"
+OPENTUI_COMMIT="3e2d0aabeb47923f05adc6f1052401367cfde3d4"
 
 echo "=== Building libopentui.so for Android aarch64 ==="
 
@@ -35,8 +35,9 @@ else
     if [ "$CURRENT" != "$OPENTUI_COMMIT" ]; then
         echo "    Resetting to pinned commit $OPENTUI_COMMIT (was $CURRENT)..."
         git fetch origin 2>/dev/null || true
-        git checkout "$OPENTUI_COMMIT"
+        git checkout --force "$OPENTUI_COMMIT"
     fi
+    git reset --hard "$OPENTUI_COMMIT" >/dev/null
 fi
 
 OPENTUI_PATCH="$REPO_ROOT/patches/opentui/android-libc-link.patch"
@@ -67,12 +68,146 @@ if [ ! -f "$OPENTUI_ZIG_DIR/build.zig" ]; then
     exit 1
 fi
 
+if [ "${OPENTUI_SKIP_ANDROID_RUNTIME_PATCH:-}" != "1" ]; then
+    echo ">>> Patching opentui Android runtime paths..."
+    python3 - "$OPENTUI_ZIG_DIR" <<'PY'
+import sys
+from pathlib import Path
+
+zig_dir = Path(sys.argv[1])
+lib_zig = zig_dir / "lib.zig"
+span_feed_zig = zig_dir / "native-span-feed.zig"
+yoga_zig = zig_dir / "yoga.zig"
+
+
+def replace_export_body(text: str, signature: str, body: str) -> str:
+    start = text.find(signature)
+    if start == -1:
+        raise SystemExit(f"missing signature: {signature}")
+    brace = text.find("{", start + len(signature))
+    if brace == -1:
+        raise SystemExit(f"missing body for: {signature}")
+    depth = 0
+    end = brace
+    while end < len(text):
+        char = text[end]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                end += 1
+                break
+        end += 1
+    return text[:brace] + "{\n" + body.rstrip() + "\n}" + text[end:]
+
+
+lib_text = lib_zig.read_text()
+audio_bodies = {
+    "export fn createAudioEngine(options_ptr: ?*const native_audio.CreateOptions) NativeHandle": """    _ = options_ptr;
+    return INVALID_HANDLE;""",
+    "export fn audioRefreshPlaybackDevices(engine_handle: NativeHandle) i32": """    _ = engine_handle;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioGetPlaybackDeviceCount(engine_handle: NativeHandle) u32": """    _ = engine_handle;
+    return 0;""",
+    "export fn audioGetPlaybackDeviceName(engine_handle: NativeHandle, index: u32, out_ptr: [*]u8, max_len: u32) u32": """    _ = engine_handle;
+    _ = index;
+    _ = out_ptr;
+    _ = max_len;
+    return 0;""",
+    "export fn audioIsPlaybackDeviceDefault(engine_handle: NativeHandle, index: u32) bool": """    _ = engine_handle;
+    _ = index;
+    return false;""",
+    "export fn audioSelectPlaybackDevice(engine_handle: NativeHandle, index: u32) i32": """    _ = engine_handle;
+    _ = index;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioClearPlaybackDeviceSelection(engine_handle: NativeHandle) void": """    _ = engine_handle;""",
+    "export fn audioStart(engine_handle: NativeHandle, options_ptr: ?*const native_audio.StartOptions) i32": """    _ = engine_handle;
+    _ = options_ptr;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioStartMixer(engine_handle: NativeHandle) i32": """    _ = engine_handle;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioStop(engine_handle: NativeHandle) i32": """    _ = engine_handle;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioLoad(engine_handle: NativeHandle, data_ptr: ?[*]const u8, data_len: u32, out_sound_id: ?*u32) i32": """    _ = engine_handle;
+    _ = data_ptr;
+    _ = data_len;
+    _ = out_sound_id;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioUnload(engine_handle: NativeHandle, sound_id: u32) i32": """    _ = engine_handle;
+    _ = sound_id;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioPlay(engine_handle: NativeHandle, sound_id: u32, options_ptr: ?*const native_audio.VoiceOptions, out_voice_id: ?*u32) i32": """    _ = engine_handle;
+    _ = sound_id;
+    _ = options_ptr;
+    _ = out_voice_id;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioStopVoice(engine_handle: NativeHandle, voice_id: u32) i32": """    _ = engine_handle;
+    _ = voice_id;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioSetVoiceGroup(engine_handle: NativeHandle, voice_id: u32, group_id: u32) i32": """    _ = engine_handle;
+    _ = voice_id;
+    _ = group_id;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioCreateGroup(engine_handle: NativeHandle, name_ptr: ?[*]const u8, name_len: u32, out_group_id: ?*u32) i32": """    _ = engine_handle;
+    _ = name_ptr;
+    _ = name_len;
+    _ = out_group_id;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioSetGroupVolume(engine_handle: NativeHandle, group_id: u32, volume: f32) i32": """    _ = engine_handle;
+    _ = group_id;
+    _ = volume;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioSetMasterVolume(engine_handle: NativeHandle, volume: f32) i32": """    _ = engine_handle;
+    _ = volume;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioMixToBuffer(engine_handle: NativeHandle, out_ptr: ?[*]f32, frame_count: u32, channels: u8) i32": """    _ = engine_handle;
+    _ = out_ptr;
+    _ = frame_count;
+    _ = channels;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioEnableTap(engine_handle: NativeHandle, enabled: bool, capacity_frames: u32) i32": """    _ = engine_handle;
+    _ = enabled;
+    _ = capacity_frames;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioReadTap(engine_handle: NativeHandle, out_ptr: ?[*]f32, frame_count: u32, channels: u8, out_frames_read: ?*u32) i32": """    _ = engine_handle;
+    _ = out_ptr;
+    _ = frame_count;
+    _ = channels;
+    _ = out_frames_read;
+    return native_audio.Status.err_invalid;""",
+    "export fn audioGetStats(engine_handle: NativeHandle, out_stats: ?*native_audio.Stats) i32": """    _ = engine_handle;
+    _ = out_stats;
+    return native_audio.Status.err_invalid;""",
+}
+for signature, body in audio_bodies.items():
+    lib_text = replace_export_body(lib_text, signature, body)
+lib_zig.write_text(lib_text)
+
+span_text = span_feed_zig.read_text()
+span_text = span_text.replace("        errdefer stream.destroy();", "        errdefer allocator.destroy(stream);")
+span_text = replace_export_body(
+    span_text,
+    "pub export fn destroyNativeSpanFeed(stream: ?*Stream) void",
+    "    _ = stream;",
+)
+span_feed_zig.write_text(span_text)
+
+yoga_text = yoga_zig.read_text()
+yoga_text = yoga_text.replace(
+    "const callback_allocator = std.heap.c_allocator;",
+    "const callback_allocator = std.heap.page_allocator;",
+)
+yoga_zig.write_text(yoga_text)
+PY
+fi
+
 echo ">>> Building with Zig (target: aarch64-linux-android)..."
 cd "$OPENTUI_ZIG_DIR"
 
 "$ZIG_BIN" build \
     -Dtarget=aarch64-linux-android \
-    -Doptimize=ReleaseSafe \
+    -Doptimize=ReleaseFast \
     --prefix . 2>&1
 
 # The build.zig installs to dest_dir="../lib/{output_name}" relative to

@@ -177,8 +177,12 @@ check_elf_aarch64 "$PKG_DIR/libc++_shared.so" "libc++_shared.so"
 # virtual paths are not intercepted on Android.
 echo ">>> Copying libopentui.so..."
 cp "$ARM64_LIBOPENTUI" "$PKG_DIR/libopentui.so"
+if ! readelf -d "$PKG_DIR/libopentui.so" 2>/dev/null | grep -q 'Shared library: \[libm\.so\]'; then
+    patchelf --add-needed libm.so "$PKG_DIR/libopentui.so"
+fi
 LIBOPENTUI_SIZE=$(stat -c%s "$PKG_DIR/libopentui.so")
 echo "    Copied $(stat -c%s "$PKG_DIR/libopentui.so") bytes"
+check_needed_library "$PKG_DIR/libopentui.so" "libopentui.so" "libm.so"
 
 # librust_pty_arm64.so is also needed as a real file on Android.
 RUST_PTY_SIZE=0

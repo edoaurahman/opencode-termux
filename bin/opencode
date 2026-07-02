@@ -13,6 +13,13 @@
 set -e
 
 dir="$(cd "$(dirname "$0")" && pwd)"
+export ANDROID_ROOT="${ANDROID_ROOT:-/system}"
+export TERMUX_VERSION="${TERMUX_VERSION:-opencode-termux}"
+export TMPDIR="${OPENCODE_TMPDIR:-${HOME:-/data/data/com.termux/files/home}/tmp}"
+export TEMP="$TMPDIR"
+export TMP="$TMPDIR"
+export OPENCODE_DISABLE_TUI_AUDIO="${OPENCODE_DISABLE_TUI_AUDIO:-1}"
+mkdir -p "$TMPDIR" 2>/dev/null || true
 
 # Locate the native libraries we ship alongside the wrapper.
 # In the flat zip layout they sit next to the wrapper; in the Termux package
