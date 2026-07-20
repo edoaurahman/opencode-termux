@@ -898,12 +898,12 @@ index 267d1f8..dcc64b7 100644
 +                // Termux (TERMUX_EXEC__PROC_SELF_EXE) provides it before falling
 +                // back to /proc/self/exe.
 +                if (bun.getenvZ("BUN_SELF_EXE")) |self_exe| {
-+                    if (std.fs.openFileAbsoluteZ(self_exe, .{})) |fd| {
++                    if (std.fs.openFileAbsolute(self_exe, .{})) |fd| {
 +                        return .fromStdFile(fd);
 +                    } else |_| {}
 +                }
 +                if (bun.getenvZ("TERMUX_EXEC__PROC_SELF_EXE")) |self_exe| {
-+                    if (std.fs.openFileAbsoluteZ(self_exe, .{})) |fd| {
++                    if (std.fs.openFileAbsolute(self_exe, .{})) |fd| {
 +                        return .fromStdFile(fd);
 +                    } else |_| {}
 +                }
