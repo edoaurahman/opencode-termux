@@ -69,6 +69,13 @@ for candidate in \
     "$dir/opencode.bin"
 do
     if [ -x "$candidate" ]; then
+        # Tell Bun's standalone loader exactly which file holds the embedded
+        # module graph. On Termux, libtermux-exec rewrites this exec to
+        # `/system/bin/linker64 <opencode.bin>`, which makes /proc/self/exe
+        # point at the linker instead of opencode.bin. BUN_SELF_EXE (checked
+        # before /proc/self/exe by our Bun patch) overrides that so Bun finds
+        # its "---- Bun! ----" trailer and runs the embedded OpenCode JS.
+        export BUN_SELF_EXE="$candidate"
         exec "$candidate" "$@"
     fi
 done
