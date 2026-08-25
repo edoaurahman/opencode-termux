@@ -1,10 +1,8 @@
 diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
-index 5a8bcb8..b1d4642 100644
 --- a/packages/core/src/zig/build.zig
 +++ b/packages/core/src/zig/build.zig
-@@ -273,6 +273,29 @@ fn buildTarget(
-         .linkage = .dynamic,
-     });
+@@ -495,5 +495,28 @@ fn buildTarget(
+     addYogaDependencies(b, lib);
  
 +    // On Android, the .so must have NEEDED libc.so so dlopen can resolve
 +    // symbols like getauxval. Zig doesn't bundle Android libc, so we directly
