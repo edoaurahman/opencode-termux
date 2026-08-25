@@ -155,23 +155,23 @@ jobs:
           echo "webkit_patch_hash=$WEBKIT_PATCH_HASH" >> $GITHUB_OUTPUT
           echo "zig_patch_hash=$ZIG_PATCH_HASH" >> $GITHUB_OUTPUT
 
-      - name: Cache ICU build
+      - name: Restore ICU build
         id: cache-icu
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/deps-android/prefix
           key: icu-android-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}
 
-      - name: Cache WebKit build
+      - name: Restore WebKit build
         id: cache-webkit
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/webkit-android
           key: webkit-android-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}
 
-      - name: Cache Bun binary
+      - name: Restore Bun binary
         id: cache-bun
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/bun-build/bun
           key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
@@ -281,6 +281,27 @@ jobs:
             ${{ env.WORK_DIR }}/packages/*.zip
             ${{ env.WORK_DIR }}/packages/*.pkg.tar.xz
             ${{ env.WORK_DIR }}/packages/*.deb
+
+      - name: Save ICU build
+        if: always() && steps.cache-icu.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WORK_DIR }}/deps-android/prefix
+          key: ${{ steps.cache-icu.outputs.cache-primary-key }}
+
+      - name: Save WebKit build
+        if: always() && steps.cache-webkit.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WORK_DIR }}/webkit-android
+          key: ${{ steps.cache-webkit.outputs.cache-primary-key }}
+
+      - name: Save Bun binary
+        if: always() && steps.cache-bun.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WORK_DIR }}/bun-build/bun
+          key: ${{ steps.cache-bun.outputs.cache-primary-key }}
 
       # =============================================
       # Release (only on tag push)
