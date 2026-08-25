@@ -30,3 +30,21 @@ diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
      const install_dir = b.addInstallArtifact(lib, .{
          .dest_dir = .{
              .override = .{
+diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
+--- a/packages/core/src/zig/build.zig
++++ b/packages/core/src/zig/build.zig
+@@ -190,8 +190,12 @@ fn addNativeAudioDependencies(
+     switch (target.result.os.tag) {
+         .macos => addMacOSSystemLibraries(b, artifact, macos_sdk_path.?),
+         .linux => {
+-            artifact.linkSystemLibrary("dl");
+-            artifact.linkSystemLibrary("pthread");
++            // Android bionic merges dl and pthread into libc; there are no
++            // separate libdl/libpthread to link against.
++            if (target.result.abi != .android and target.result.abi != .androideabi) {
++                artifact.linkSystemLibrary("dl");
++                artifact.linkSystemLibrary("pthread");
++            }
+         },
+         else => {},
+     }
