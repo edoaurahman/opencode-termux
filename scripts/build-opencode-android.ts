@@ -13,6 +13,7 @@
 import { $ } from "bun"
 import fs from "fs"
 import path from "path"
+import { fileURLToPath } from "url"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
 
 // These are set by the build-opencode.sh wrapper script
@@ -107,22 +108,16 @@ console.log("\n=== Step 3: Bundling OpenCode ===")
 
 const plugin = createSolidTransformPlugin()
 
-// Find parser.worker.js
-const localPath = path.resolve(OPENCODE_DIR, "node_modules/@opentui/core/parser.worker.js")
-const rootPath = path.resolve(OPENCODE_DIR, "../../node_modules/@opentui/core/parser.worker.js")
-let parserWorkerResolved: string
-try {
-  parserWorkerResolved = fs.realpathSync(fs.existsSync(localPath) ? localPath : rootPath)
-} catch {
-  // Try bun's module resolution
-  parserWorkerResolved = require.resolve("@opentui/core/parser.worker.js")
-}
+// Tree-sitter worker: read the worker source from @opentui/core and embed it
+// as a virtual file (matches upstream script/build.ts for opencode >= 1.18)
+const parserWorkerResolved = fileURLToPath(import.meta.resolve("@opentui/core/parser.worker"))
+const treeSitterWorker = await Bun.file(parserWorkerResolved).text()
 console.log(`Parser worker: ${parserWorkerResolved}`)
 
-const workerPath = "./src/cli/cmd/tui/worker.ts"
+const treeSitterWorkerPath = "opentui-tree-sitter-worker.js"
+const workerPath = "./src/cli/tui/worker.ts"
 
 const bunfsRoot = "/$bunfs/root/"
-const workerRelativePath = path.relative(OPENCODE_DIR, parserWorkerResolved).replaceAll("\\", "/")
 
 await $`rm -rf ${OUTPUT_DIR}`
 await $`mkdir -p ${OUTPUT_DIR}`
@@ -133,9 +128,10 @@ const hostBinaryPath = path.join(OUTPUT_DIR, "opencode-host")
 
 console.log("Building standalone binary for host platform...")
 const result = await Bun.build({
-  conditions: ["browser"],
+  conditions: ["bun", "node"],
   tsconfig: "./tsconfig.json",
   plugins: [plugin],
+  external: ["node-gyp"],
   compile: {
     autoloadBunfig: false,
     autoloadDotenv: false,
@@ -144,14 +140,20 @@ const result = await Bun.build({
     outfile: hostBinaryPath,
     execArgv: [`--user-agent=opencode/${VERSION}`, "--use-system-ca", "--"],
   },
-  entrypoints: ["./src/index.ts", parserWorkerResolved, workerPath],
+  files: {
+    [treeSitterWorkerPath]: treeSitterWorker,
+  },
+  entrypoints: ["./src/index.ts", treeSitterWorkerPath, workerPath],
   define: {
+    FFF_LIBC: '"gnu"',
     OPENCODE_VERSION: `'${VERSION}'`,
+    OPENCODE_MODELS_DEV: modelsData,
     OPENCODE_MIGRATIONS: JSON.stringify(migrations),
-    OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
+    OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + treeSitterWorkerPath,
     OPENCODE_WORKER_PATH: workerPath,
     OPENCODE_CHANNEL: `'${CHANNEL}'`,
-    OPENCODE_LIBC: "",
+    OPENCODE_LIBC: "'glibc'",
+    "process.env.OPENTUI_LIBC": '"glibc"',
   },
 })
 
