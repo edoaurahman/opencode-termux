@@ -7955,13 +7955,17 @@ var CORE_ASSET_PREFIX = "@opentui/core/";
 var PARSER_WORKER_ASSET_KEY = `${CORE_ASSET_PREFIX}parser.worker.js`;
 var TREE_SITTER_WASM_ASSET_KEY = "web-tree-sitter/tree-sitter.wasm";
 function resolveParserWorkerViaDefine() {
+  let configured = null;
   try {
-    const configured = typeof OTUI_TREE_SITTER_WORKER_PATH !== "undefined" ? OTUI_TREE_SITTER_WORKER_PATH : process.env.OTUI_TREE_SITTER_WORKER_PATH;
-    if (configured && existsSync(configured)) {
-      return configured;
-    }
-  } catch {}
-  return void 0;
+    configured = OTUI_TREE_SITTER_WORKER_PATH;
+  } catch (e) {}
+  if (!configured) {
+    configured = process.env.OTUI_TREE_SITTER_WORKER_PATH;
+  }
+  if (!configured && typeof import.meta.path === "string" && import.meta.path.startsWith("/$bunfs/")) {
+    configured = "/$bunfs/root/opentui-tree-sitter-worker.js";
+  }
+  return configured || void 0;
 }
 var bundledTreeSitterWorkerPath = resolveParserWorkerViaDefine() ?? await resolveBundledFilePath(PARSER_WORKER_ASSET_KEY, () => import("@opentui/core/parser.worker", { with: { type: "file" } }), new URL("../lib/tree-sitter/parser.worker.js", import.meta.url), import.meta.url, { useAssetRoot: false });
 function resolveDefaultParserAsset(relativePath, fallbackPath) {
