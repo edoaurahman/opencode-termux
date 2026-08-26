@@ -38,6 +38,34 @@ echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC"
 "$HOST_BUN" install
 
+# =============================================
+# Termux overlay fixes (opencode-termux local patches)
+# 1. global.ts: Termux tmp dir ($PREFIX/tmp instead of /tmp)
+# 2. @opentui/core chunk: null-guard + fallback for bundled asset
+#    resolution (fixes "loadedPath.startsWith" TypeError on Android)
+# =============================================
+echo ">>> Applying Termux overlay: global tmp fix..."
+patch -d "$OPENCODE_SRC" -p1 < "$REPO_ROOT/patches/opencode/global-tmp-termux.diff"
+
+echo ">>> Injecting patched @opentui/core chunk..."
+CHUNK_NAME="chunk-bun-t2myhmwd.js"
+OVERLAY_CHUNK="$REPO_ROOT/patches/opencode/$CHUNK_NAME"
+if [ ! -f "$OVERLAY_CHUNK" ]; then
+    echo "ERROR: overlay chunk not found at $OVERLAY_CHUNK"
+    exit 1
+fi
+INJECTED=0
+while IFS= read -r -d '' f; do
+    cp "$OVERLAY_CHUNK" "$f"
+    grep -q "OpenTUI-TERMUX-PATCH" "$f" || { echo "ERROR: injection verify failed for $f"; exit 1; }
+    INJECTED=$((INJECTED + 1))
+done < <(find "$OPENCODE_SRC/node_modules" -type f -name "$CHUNK_NAME" -print0)
+if [ "$INJECTED" -eq 0 ]; then
+    echo "ERROR: $CHUNK_NAME not found in opencode node_modules"
+    exit 1
+fi
+echo "    Injected patched chunk into $INJECTED location(s)"
+
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD/bun"
 if [ ! -f "$ANDROID_BUN" ]; then

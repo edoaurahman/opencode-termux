@@ -1,0 +1,15 @@
+--- a/packages/core/src/global.ts
++++ b/packages/core/src/global.ts
+@@ -12,7 +12,11 @@
+ const cache = path.join(xdgCache!, app)
+ const config = path.join(xdgConfig!, app)
+ const state = path.join(xdgState!, app)
+-const tmp = path.join(os.tmpdir(), app)
++// Termux/Android: os.tmpdir() resolves to /tmp which is not writable without root.
++// Prefer $PREFIX/tmp when running inside a Termux environment.
++const isTermux = process.env.TERMUX_VERSION !== undefined || process.platform === "android"
++const tmpRoot = isTermux && process.env.PREFIX ? path.join(process.env.PREFIX, "tmp") : os.tmpdir()
++const tmp = path.join(tmpRoot, app)
+ 
+ const paths = {
+   get home() {
