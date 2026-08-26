@@ -114,7 +114,8 @@ const parserWorkerResolved = fileURLToPath(import.meta.resolve("@opentui/core/pa
 const treeSitterWorker = await Bun.file(parserWorkerResolved).text()
 console.log(`Parser worker: ${parserWorkerResolved}`)
 
-const treeSitterWorkerPath = "opentui-tree-sitter-worker.js"
+const treeSitterWorkerPath = "./opentui-tree-sitter-worker.js"
+await Bun.write(path.join(OPENCODE_DIR, treeSitterWorkerPath), treeSitterWorker)
 const workerPath = "./src/cli/tui/worker.ts"
 
 const bunfsRoot = "/$bunfs/root/"
@@ -139,9 +140,6 @@ const result = await Bun.build({
     autoloadPackageJson: true,
     outfile: hostBinaryPath,
     execArgv: [`--user-agent=opencode/${VERSION}`, "--use-system-ca", "--"],
-  },
-  files: {
-    [treeSitterWorkerPath]: treeSitterWorker,
   },
   entrypoints: ["./src/index.ts", treeSitterWorkerPath, workerPath],
   define: {
