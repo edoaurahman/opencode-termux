@@ -1,15 +1,38 @@
 --- a/packages/core/src/global.ts
 +++ b/packages/core/src/global.ts
-@@ -12,7 +12,11 @@
+@@ -12,7 +12,34 @@
  const cache = path.join(xdgCache!, app)
  const config = path.join(xdgConfig!, app)
  const state = path.join(xdgState!, app)
 -const tmp = path.join(os.tmpdir(), app)
-+// Termux/Android: os.tmpdir() resolves to /tmp which is not writable without root.
-+// Prefer $PREFIX/tmp when running inside a Termux environment.
-+const isTermux = process.env.TERMUX_VERSION !== undefined || process.platform === "android"
-+const tmpRoot = isTermux && process.env.PREFIX ? path.join(process.env.PREFIX, "tmp") : os.tmpdir()
-+const tmp = path.join(tmpRoot, app)
++// Termux/Android: os.tmpdir() resolves to /tmp which is not writable without root,
++// and the environment may be stripped inside the process, so detection falls back
++// to the well-known Termux prefix on disk.
++async function resolveTmpRoot(): Promise<string> {
++  const isTermuxLike =
++    process.env.TERMUX_VERSION !== undefined ||
++    process.env.PREFIX !== undefined ||
++    process.platform === "android" ||
++    fs.existsSync("/data/data/com.termux")
++  if (!isTermuxLike) {
++    return os.tmpdir()
++  }
++  const candidates = [
++    process.env.TMPDIR,
++    process.env.PREFIX ? path.join(process.env.PREFIX, "tmp") : undefined,
++    "/data/data/com.termux/files/usr/tmp",
++    os.tmpdir(),
++  ]
++  for (const candidate of candidates) {
++    if (typeof candidate !== "string" || candidate.length === 0) continue
++    try {
++      await fs.mkdir(path.join(candidate, app), { recursive: true })
++      return candidate
++    } catch {}
++  }
++  return os.tmpdir()
++}
++const tmp = path.join(await resolveTmpRoot(), app)
  
  const paths = {
    get home() {
