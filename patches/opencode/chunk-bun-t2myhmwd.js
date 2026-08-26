@@ -533,6 +533,7 @@ var toArrayBuffer = backend.toArrayBuffer;
 // src/platform/runtime.ts
 import { existsSync } from "fs";
 import { mkdir, writeFile as writeFileNode } from "fs/promises";
+import { mkdirSync as otuiMkdirSync, readFileSync as otuiReadFileSync } from "fs";
 import { dirname, isAbsolute as isAbsolute2, resolve } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 
@@ -12051,7 +12052,7 @@ try {
   if (isBunfsPath(targetLibPath)) {
     targetLibPath = targetLibPath.replace("../", "");
   }
-  if (!existsSync3(targetLibPath)) {
+  if (!isBunfsPath(targetLibPath) && !existsSync3(targetLibPath)) {
     throw new Error(`OpenTUI native library does not exist at ${JSON.stringify(targetLibPath)}`);
   }
 } catch (error) {
@@ -12135,7 +12136,28 @@ function getOpenTUILib(libPath) {
   if (!resolvedLibPath) {
     throw targetLibError ?? new Error(`OpenTUI is not supported on the current platform: ${process.platform}-${process.arch}`);
   }
-  const rawSymbols = dlopen(resolvedLibPath, {
+  let dlopenPath = resolvedLibPath;
+  if (isBunfsPath(dlopenPath)) {
+    try {
+      const bytes = otuiReadFileSync(dlopenPath);
+      const tmpBase = process.env.TMPDIR || (process.env.PREFIX ? `${process.env.PREFIX}/tmp` : "/tmp");
+      const cacheDir = `${tmpBase}/opentui-libs`;
+      otuiMkdirSync(cacheDir, { recursive: true });
+      const extractedPath = `${cacheDir}/libopentui-${bytes.length}.so`;
+      let needsWrite = true;
+      try {
+        needsWrite = otuiReadFileSync(extractedPath).length !== bytes.length;
+      } catch (e2) {}
+      if (needsWrite) {
+        writeFileSync(extractedPath, bytes);
+      }
+      console.warn(`OpenTUI-TERMUX-PATCH: extracted native lib to ${extractedPath}`);
+      dlopenPath = extractedPath;
+    } catch (extractError) {
+      console.warn(`OpenTUI-TERMUX-PATCH: bunfs native lib extraction failed (${dlopenPath}): ${extractError}`);
+    }
+  }
+  const rawSymbols = dlopen(dlopenPath, {
     setLogCallback: {
       args: ["ptr"],
       returns: "void"
