@@ -49,9 +49,27 @@ fi
 echo ">>> Building with Zig (target: aarch64-linux-android)..."
 cd "$OPENTUI_ZIG_DIR"
 
+# Zig cannot provision libc for *-android targets on its own, so provide an
+# explicit libc definition file pointing at the NDK sysroot (bionic).
+if [ -z "${ANDROID_NDK_HOME:-}" ]; then
+    echo "ERROR: ANDROID_NDK_HOME is not set"
+    exit 1
+fi
+SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+LIBC_FILE="${WORK_DIR:-$PWD}/android-libc.txt"
+cat > "$LIBC_FILE" <<ZIGLIBC
+include_dir=$SYSROOT/usr/include
+sys_include_dir=$SYSROOT/usr/include/aarch64-linux-android
+crt_dir=$SYSROOT/usr/lib/aarch64-linux-android/24
+msvc_lib_dir=
+kernel32_lib_dir=
+gcc_dir=
+ZIGLIBC
+
 "$ZIG_BIN" build \
     -Dtarget=aarch64-linux-android \
     -Doptimize=ReleaseSafe \
+    --libc "$LIBC_FILE" \
     --prefix . 2>&1
 
 # The build.zig installs to dest_dir="../lib/{output_name}" relative to
