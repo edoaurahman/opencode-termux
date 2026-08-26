@@ -1,6 +1,6 @@
 --- a/packages/core/src/global.ts
 +++ b/packages/core/src/global.ts
-@@ -12,7 +12,34 @@
+@@ -12,7 +12,39 @@
  const cache = path.join(xdgCache!, app)
  const config = path.join(xdgConfig!, app)
  const state = path.join(xdgState!, app)
@@ -9,11 +9,16 @@
 +// and the environment may be stripped inside the process, so detection falls back
 +// to the well-known Termux prefix on disk.
 +async function resolveTmpRoot(): Promise<string> {
++  let termuxDetected = false
++  try {
++    await fs.stat("/data/data/com.termux")
++    termuxDetected = true
++  } catch {}
 +  const isTermuxLike =
 +    process.env.TERMUX_VERSION !== undefined ||
 +    process.env.PREFIX !== undefined ||
 +    process.platform === "android" ||
-+    fs.existsSync("/data/data/com.termux")
++    termuxDetected
 +  if (!isTermuxLike) {
 +    return os.tmpdir()
 +  }
