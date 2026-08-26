@@ -38,6 +38,11 @@ echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC"
 "$HOST_BUN" install
 
+# Install all platform variants of @opentui/core so Bun.build can resolve
+# every dynamic import in the chunk (darwin/win32/linux x64+arm64, musl).
+echo ">>> Installing @opentui/core platform variants (universal)..."
+"$HOST_BUN" install --os="*" --cpu="*" @opentui/core@0.4.5
+
 # =============================================
 # Termux overlay fixes (opencode-termux local patches)
 # 1. global.ts: Termux tmp dir ($PREFIX/tmp instead of /tmp)
@@ -111,6 +116,24 @@ else
     echo "WARNING: Could not find x86_64 libopentui.so in node_modules"
     echo "         The build may embed the wrong architecture"
 fi
+
+# Also swap the android .so into the linux-arm64 package: at runtime the
+# (linux-spoofed) Android bun resolves @opentui/core-linux-arm64, so the
+# embedded library must be the bionic aarch64 build, not glibc.
+echo ">>> Swapping ARM64 libopentui.so into @opentui/core-linux-arm64..."
+ARM64_SWAPPED=0
+for f in "$OPENCODE_SRC"/node_modules/.bun/@opentui+core-linux-arm64@*/node_modules/@opentui/core-linux-arm64/libopentui.so; do
+    if [ -f "$f" ]; then
+        cp "$f" "${f}.glibc.bak"
+        cp "$ARM64_LIBOPENTUI" "$f"
+        ARM64_SWAPPED=$((ARM64_SWAPPED + 1))
+    fi
+done
+if [ "$ARM64_SWAPPED" -eq 0 ]; then
+    echo "ERROR: @opentui/core-linux-arm64/libopentui.so not found for swap"
+    exit 1
+fi
+echo "    Swapped $ARM64_SWAPPED location(s)"
 
 # Create dist directory
 mkdir -p "$DIST_DIR"
