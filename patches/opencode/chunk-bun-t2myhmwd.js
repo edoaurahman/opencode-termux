@@ -12140,9 +12140,25 @@ function getOpenTUILib(libPath) {
   if (isBunfsPath(dlopenPath)) {
     try {
       const bytes = otuiReadFileSync(dlopenPath);
-      const tmpBase = process.env.TMPDIR || (process.env.PREFIX ? `${process.env.PREFIX}/tmp` : "/tmp");
-      const cacheDir = `${tmpBase}/opentui-libs`;
-      otuiMkdirSync(cacheDir, { recursive: true });
+      const candidates = [
+        process.env.TMPDIR,
+        process.env.TMP,
+        process.env.PREFIX ? `${process.env.PREFIX}/tmp` : null,
+        "/data/data/com.termux/files/usr/tmp",
+        "/tmp",
+      ].filter((p2) => typeof p2 === "string" && p2.length > 0);
+      let cacheDir = null;
+      for (const dir of candidates) {
+        const target = `${dir}/opentui-libs`;
+        try {
+          otuiMkdirSync(target, { recursive: true });
+          cacheDir = target;
+          break;
+        } catch (e3) {}
+      }
+      if (!cacheDir) {
+        throw new Error(`no writable tmp dir among: ${candidates.join(", ")}`);
+      }
       const extractedPath = `${cacheDir}/libopentui-${bytes.length}.so`;
       let needsWrite = true;
       try {
